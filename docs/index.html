@@ -43,8 +43,11 @@
   .step.s1 > b { margin-top: 3px; flex: none; }
   .ctl { display: grid; grid-template-columns: max-content max-content max-content max-content; gap: 6px 8px; align-items: center; }
   .ctl label.r { margin-left: 8px; }
-  .ctl select.wide { grid-column: 2 / span 3; justify-self: start; }
+  .ctl .wide { grid-column: 2 / span 3; justify-self: start; }
+  #chem { display: flex; gap: 14px; }
   #filters[hidden] { display: none; }
+  #chemOpt[hidden] { display: none; }
+  .s-extra { color: var(--accent); }
   #filtersBtn { font-size: 12px; margin-left: 6px; }
   #filterNote { margin-left: 8px; }
   .legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
@@ -109,6 +112,10 @@
         <option value="all" selected>everything requested (incl. unranked)</option></select>
       <label for="cfg">Grid &amp; levels</label>
       <select id="cfg" class="wide"></select>
+      <label>Configuration</label>
+      <span class="wide" id="chem">
+        <label><input type="radio" name="chem" value="MTso" checked> CESM3 MTso (Standard)</label>
+        <label><input type="radio" name="chem" value="chem"> CESM3 MTt4s (Interactive Chemistry)</label></span>
     </div>
   </div>
 
@@ -138,6 +145,10 @@
   <div class="step"><b>3</b> Realms and frequencies requested
     <div class="row" id="realms"><span class="lbl">realm</span></div>
     <div class="row" id="freqs"><span class="lbl">frequency</span></div>
+    <div class="row" id="additional"><span class="lbl"><span class="sym s-extra" title="additional variable, not in the CMIP7 request">&#10010;</span> additional (not CMIP7)</span>
+      <label id="chemOpt" hidden><input type="checkbox" id="mt4sVars" checked> interactive chemistry</label>
+      <label><input type="checkbox" id="addLand" checked> land (not implemented)</label>
+      <label><input type="checkbox" id="addOcean" checked> ocean (not implemented)</label></div>
   </div>
 
   <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).</div>
@@ -192,6 +203,7 @@
     <span><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
     <span><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
     <span><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
+    <span><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request</span>
     <span><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
     <span>Click a row to disable or re-enable it (excluded from the namelists and the total); &ldquo;show info&rdquo; audits it.</span>
   </div>
@@ -498,6 +510,9 @@ function setup() {
   if (q && B.experiments[q]) { $("exp").value = q; state.exp = q; }
   render();
 }
+
+document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", () =>
+  $("chemOpt").hidden = document.querySelector("input[name=chem]:checked").value !== "chem"));
 
 document.body.addEventListener("change", (e) => {
   const t = e.target;
