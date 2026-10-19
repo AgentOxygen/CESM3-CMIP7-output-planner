@@ -66,6 +66,11 @@
   table { border-collapse: collapse; width: 100%; }
   td { padding: 2px 6px; border-top: 1px solid #f0f1f3; vertical-align: top; }
   tr.item { cursor: pointer; } tr.item:hover { background: #f6f9fd; }
+  tr.item.off { color: #999; } tr.item.off td.nm, tr.item.off td.fq, tr.item.off td.sz { text-decoration: line-through; }
+  tr.item.off .sym, tr.item.off .pill { opacity: .4; }
+  tr.item[data-miss] { cursor: default; }
+  td.ib { text-align: right; } td.ib button { font-size: 11px; padding: 0 6px; }
+  #summary a { color: var(--accent); cursor: pointer; margin-left: 8px; }
   td.nm, td.fq, td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
   td.fq { color: var(--muted); } td.cm { color: var(--muted); width: 100%; font-size: 12px; }
   tr.detail > td { background: #fafbfc; padding: 6px 10px 10px 34px; font-size: 12px; }
@@ -188,7 +193,7 @@
     <span><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
     <span><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
     <span><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
-    <span>Click a row to audit it.</span>
+    <span>Click a row to disable or re-enable it (excluded from the namelists and the total); &ldquo;show info&rdquo; audits it.</span>
   </div>
 </header>
 
@@ -200,7 +205,7 @@
 <script src="namelist.js"></script>
 <script>
 let B;
-const state = { exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
+const state = { off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
 const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;" };
 const LABEL = { "verified": "verified", "source": "in CESM3 source", "spreadsheet-only": "spreadsheet only",
                 "missing": "missing mapping" };
@@ -307,52 +312,60 @@ function compute() {
   return { comps, missing, counts, nreq: reqs.length };
 }
 
+// Lines the user has not disabled, sorted; what the totals and downloads use.
+const offKey = (c, k) => c + "|" + k;
+const active = (c) => [...current.comps[c].values()].filter(r => !state.off.has(offKey(c, r.key))).sort(byLine);
+
 // --- rendering --------------------------------------------------------------
 
 const openComps = new Set();   // component lists the user expanded; they start collapsed and keep their state across re-renders
 let current;   // last compute() result, for downloads and row expansion
 
+const INFO_TD = '<td class="ib"><button data-info>show info</button></td></tr>';
+
 function render() {
   filterNote();
   if (!state.exp) { $("zip").disabled = true; $("tot").textContent = "\u2013"; $("totnote").textContent = ""; $("main").innerHTML = '<div class="hint">Choose an experiment to list the CESM3 variables its CMIP7 request needs.</div>'; return; }
   current = compute();
-  $("zip").disabled = !Object.keys(Namelist.COMPONENTS).some(c => current.comps[c].size);
+  $("zip").disabled = !Object.keys(Namelist.COMPONENTS).some(c => active(c).length);
   for (const k of Object.keys(current.counts)) { const e = $("n-" + k); if (e) e.textContent = `(${current.counts[k]})`; }
   let total = 0, unpriced = 0, lines = 0;
   const sub = {};
   for (const c of B.components) for (const row of current.comps[c].values()) {
     const p = price(c, row.name, row.freq);
-    row.p = p; lines++;
+    row.p = p;
+    if (state.off.has(offKey(c, row.key))) continue;
+    lines++;
     if (p.gb === undefined) unpriced++; else { total += p.gb; sub[c] = (sub[c] || 0) + p.gb; }
   }
   $("tot").textContent = fmtGB(total);
   $("totnote").textContent = `${lines - unpriced} of ${lines} lines priced`;
-  const parts = [`<div id="summary"><span>${current.nreq} CMIP7 requests for <b>${esc(state.exp)}</b>.</span><span class="dl">Downloads</span></div>`];
+  const parts = [`<div id="summary"><span>${current.nreq} CMIP7 requests for <b>${esc(state.exp)}</b>.${state.off.size ? ` ${state.off.size} line(s) disabled <a data-reset>re-enable all</a>` : ""}</span><span class="dl">Downloads</span></div>`];
   for (const c of B.components) {
-    const rows = [...current.comps[c].values()].sort(byLine);
+    const all = [...current.comps[c].values()].sort(byLine), rows = all.filter(r => !state.off.has(offKey(c, r.key)));
     const miss = current.missing[c];
-    if (!rows.length && !miss.length) continue;
+    if (!all.length && !miss.length) continue;
     parts.push(`<details class="comp" data-c="${c}" ${openComps.has(c) ? "open" : ""}><summary><span>${c}</span>` +
       `<span class="sub">${rows.length} variable/frequency lines` + (sub[c] ? `, ${esc(fmtGB(sub[c]))} GB/yr` : "") + (miss.length ? `, ${miss.length} requests with no mapping` : "") + `</span>` +
       (Namelist.COMPONENTS[c] ? `<button data-dl="nl" data-c="${c}" ${rows.length ? "" : "disabled"} title="history namelist for ${c}">${Namelist.COMPONENTS[c].file}</button>` : "") +
       `<button data-dl="txt" data-c="${c}" ${rows.length ? "" : "disabled"} title="plain list of VARIABLE FREQUENCY lines">raw_text</button>` +
       `<button data-dl="csv" data-c="${c}" ${rows.length ? "" : "disabled"} title="audit trail: every line traced to its spreadsheet rows">csv</button></summary>` +
       `<div class="scroll"><table><tbody>`);
-    rows.forEach((row, i) => {
+    all.forEach((row, i) => {
       const sts = [...new Set(row.items.map(x => x.t.st))], srcs = [...new Set(row.items.map(x => x.t.cs))];
       const mm = row.items.some(x => x.t.mm);
       const names = [...new Set(row.items.map(x => x.r.n))];
-      parts.push(`<tr class="item" data-c="${c}" data-k="${esc(row.key)}">` +
+      parts.push(`<tr class="item${state.off.has(offKey(c, row.key)) ? " off" : ""}" data-c="${c}" data-k="${esc(row.key)}">` +
         `<td>${sts.map(sym).join("")}${srcs.map(srcPill).join("")}${mm ? '<span class="pill mm">&ne;realm</span>' : ""}</td>` +
         `<td class="nm">${esc(cesmName(c, row))}${row.method && !colon(c) ? ` <span class="pill" title="time method: ${esc(METHOD[row.method])}">${esc(METHOD[row.method])}</span>` : ""}</td><td class="fq">${esc(row.freq)}</td>` +
         `<td class="cm">${esc(names.slice(0, 2).join("  ·  "))}${names.length > 2 ? `  · +${names.length - 2} more` : ""}</td>` +
         (row.p.gb === undefined
-          ? `<td class="sz none" title="${esc(row.p.why)}">&ndash;</td></tr>`
-          : `<td class="sz">${esc(fmtGB(row.p.gb))} GB/yr</td></tr>`));
+          ? `<td class="sz none" title="${esc(row.p.why)}">&ndash;</td>`
+          : `<td class="sz">${esc(fmtGB(row.p.gb))} GB/yr</td>`) + INFO_TD);
     });
     for (const r of miss) {
       parts.push(`<tr class="item" data-miss="${esc(r.n)}"><td>${sym("missing")}${srcPill("realm-fallback")}</td>` +
-        `<td class="nm" style="color:var(--bad)">(no CESM name)</td><td class="fq">${esc(r.f)}</td><td class="cm">${esc(r.n)}</td><td class="sz none"></td></tr>`);
+        `<td class="nm" style="color:var(--bad)">(no CESM name)</td><td class="fq">${esc(r.f)}</td><td class="cm">${esc(r.n)}</td><td class="sz none"></td>${INFO_TD}</tr>`);
     }
     parts.push("</tbody></table></div></details>");
   }
@@ -391,15 +404,21 @@ $("main").addEventListener("toggle", (e) => {
 $("main").addEventListener("click", (e) => {
   const dl = e.target.closest("button[data-dl]");
   if (dl) { e.preventDefault(); download(dl.dataset.dl, dl.dataset.c); return; }
+  if (e.target.closest("[data-reset]")) { state.off.clear(); render(); return; }
   const tr = e.target.closest("tr.item");
   if (!tr) return;
+  if (!e.target.closest("button[data-info]")) {
+    if (tr.dataset.miss === undefined) { const k = offKey(tr.dataset.c, tr.dataset.k); state.off.has(k) ? state.off.delete(k) : state.off.add(k); render(); }
+    return;
+  }
   const open = tr.nextElementSibling;
-  if (open && open.classList.contains("detail")) { open.remove(); return; }
+  if (open && open.classList.contains("detail")) { open.remove(); e.target.textContent = "show info"; return; }
+  e.target.textContent = "hide info";
   const items = tr.dataset.miss !== undefined
     ? [{ r: B.requests.find(r => r.n === tr.dataset.miss && !r.t.length), t: null }]
     : current.comps[tr.dataset.c].get(tr.dataset.k).items;
   const size = tr.dataset.miss !== undefined ? "" : sizeHtml(tr.dataset.c, current.comps[tr.dataset.c].get(tr.dataset.k));
-  tr.insertAdjacentHTML("afterend", `<tr class="detail"><td colspan="5">${size}${detailHtml(items)}</td></tr>`);
+  tr.insertAdjacentHTML("afterend", `<tr class="detail"><td colspan="6">${size}${detailHtml(items)}</td></tr>`);
 });
 
 // --- export -----------------------------------------------------------------
@@ -420,7 +439,7 @@ const nlMeta = (rows) => ({ iceFields: B.cice_fields, momFields: B.mom_fields, t
 $("zip").addEventListener("click", () => {
   const files = [];
   for (const c of Object.keys(Namelist.COMPONENTS)) {
-    const rows = [...current.comps[c].values()].sort(byLine);
+    const rows = active(c);
     if (rows.length) files.push(...Namelist.files(c, rows, nlMeta(rows)));
   }
   if (!files.length) return;
@@ -430,7 +449,7 @@ $("zip").addEventListener("click", () => {
 });
 
 function download(kind, c) {
-  const rows = [...current.comps[c].values()].sort(byLine);
+  const rows = active(c);
   const base = `cesm3_${state.exp}_${c}`;
   if (kind === "nl") {
     const out = Namelist.build(c, rows, nlMeta(rows));
