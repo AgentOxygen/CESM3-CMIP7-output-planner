@@ -1,11 +1,13 @@
-IMAGE = cesm-field-scraper:cesm3_0_alpha09e
+TAG ?= cesm3_0_alpha09e                # make build run TAG=cesm3_0_alpha11d OUT=out-alpha11d
+OUT ?= out
+IMAGE = cesm-field-scraper:$(TAG)
 
 build:
-	docker build -f docker/cesm3_0_alpha09e.Dockerfile -t $(IMAGE) .
+	docker build -f docker/$(TAG).Dockerfile -t $(IMAGE) .
 
 run:
-	mkdir -p out
-	docker run --rm -u "$$(id -u):$$(id -g)" -v "$(CURDIR)/out:/out" $(IMAGE)
+	mkdir -p $(OUT)
+	docker run --rm -u "$$(id -u):$$(id -g)" -v "$(CURDIR)/$(OUT):/out" $(IMAGE)
 
 test:
 	docker run --rm -v "$(CURDIR):/tool" -w /tool -e PYTHONDONTWRITEBYTECODE=1 python:3.12-slim \

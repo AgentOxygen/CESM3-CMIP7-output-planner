@@ -1,6 +1,6 @@
 # cesm-field-scraper
 
-Reads the CESM `cesm3_0_alpha09e` source and writes YAML listing every
+Reads the CESM `cesm3_0_alpha09e` (or `cesm3_0_alpha11d`: `make build run TAG=cesm3_0_alpha11d OUT=out-alpha11d`) source and writes YAML listing every
 history field each component can register: name, dims, units, long name,
 and the source line. The Dockerfile is the record of how the YAML was made.
 The scraper depends on nothing else in this repository; the repository's importer
@@ -63,8 +63,33 @@ baseline configuration's CAM build registers:
 
 - `Q`
 - PUMAS's `cnst_names`
-- the species of the chemistry package `CHEM` in `components/cam.py`
-  (`trop_strat_mam5_t4s2`, from the compset's `-chem` option; 154 constituents)
+- the species of each configuration's chemistry package (`chem` in `configurations.yaml`,
+  e.g. `trop_strat_mam5_t4s2`, 154 constituents, or `ghg_mam4`); `CHEM` in `components/cam.py`
+  without configurations. A name only some packages produce gets `requires: {chem: [...]}`.
+
+The same package's `mo_sim_dat.F90` `rxt_tag_lst` names the per-reaction fields (`jno2`,
+`usr_*`, and `r_*` from `rate_diags.F90`), and its `rxn_rate_sums` in `namelist_defaults_cam.xml`
+names the rate sums (`O3_Loss`, `OddOx_Loss_Tot`, ...; build-namelist adds them only when the
+mechanism has `O3S`).
+
+Some loops are resolved from the package's tables rather than expanded over every constituent:
+
+- The modal-aerosol column tendencies, from each file's `dotend` rules (`modal_names` in `components/cam.py`).
+  The modes are the package's `*_aN` constituents (as build-namelist's `mode_defs`, mode types by mode
+  count); a "pair" is a from-mode species and its to-mode namesake (same name less the mode digit).
+  - `modal_aero_calcsize[_cam].F90`: every mode's number (`_sfcsiz1/2`); the aitken -> accum pair (`_sfcsiz3/4`).
+  - `modal_aero_gasaerexch[_cam].F90`: `_sfgaex1` for H2SO4, NH3, MSA, SOAG*, each mode's so4/soa (nh4 with
+    NH3) and the primary-carbon -> accum aging pair; `_sfgaex2` for both ends of every rename pair
+    (cam7's `modal_accum_coarse_exch`: aitken->accum, accum<->coarse, or accum<->coarse_strat in MAM5).
+  - `modal_aero_coag[_cam].F90`: `_sfcoag1` for aitken->accum, pcarbon->accum, aitken->pcarbon and aging.
+  - `modal_aero_newnuc[_cam].F90`: `_sfnnuc1` for H2SO4 and aitken number/so4 (nh4 and NH3 if present).
+  - Cloud-borne copies (`_cN`) for calcsize and `_sfgaex2`.
+- `tracer_cnst.F90` (prescribed oxidants, `[lev]`): the species build-namelist puts in
+  `tracer_cnst_specifier` (`O3`, `OH`, `NO3`, `HO2`, `HALONS`) that are the package's invariants
+  (`inv_lst`, which also names `mo_setinv`'s `<inv>_dens`/`_vmr`). So `ghg_mam4` gets all five,
+  `trop_strat_mam5_t4s2` (solves them) none. A `user_nl_cam` specifier can add others.
+
+The modal files reuse one `fieldname` for every call, so each call takes the `fieldname` assignment just before it.
 
 It also expands the per-constituent name arrays built in `constituents.F90`
 (`sflxnam`, `ptendnam`, …). An index that names one constituent
@@ -74,8 +99,10 @@ records can over-claim; their `alternatives` count says by how much.
 
 ## Checked against a real alpha09e run
 
-`python compare_logs.py` (see Configurations) against the logs of a `B1850C_MTt4s` run, which shares
-the baseline's atmosphere and chemistry, gives for `BHISTE_MTt4s`:
+The run log under `../reference/` is an MTso (`ghg_mam4`) run; there is no MTt4s log. The table below
+scored it against `BHISTE_MTt4s` before that was known. Against `BHISTC_MTso` on alpha11d output CAM
+recall is 56% exact, and every modal-aerosol tendency (`*_sfcsiz*`, `*_sfgaex1/2`, `*_sfcoag1`,
+`*_sfnnuc1`), `<inv>_dens/_vmr` and prescribed-oxidant name matches the log exactly (none missing, none extra).
 
 | | names in the log | exact | pattern only | not found |
 |---|---|---|---|---|

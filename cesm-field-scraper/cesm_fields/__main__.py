@@ -36,9 +36,11 @@ Dumper.add_representer(list, lambda d, data: d.represent_sequence(
 def main(cesm, out, configurations=None):
     tag = os.environ.get("CESM_TAG", "an unpinned checkout")
     configs = yaml.safe_load(Path(configurations).read_text()) if configurations else {}
+    configs = {k: v for k, v in configs.items() if v.get("cesm_tag", tag) == tag}     # configurations of this tag
+    chems = sorted({v["chem"] for v in configs.values() if "chem" in v}) or [cam.CHEM]
     Path(out).mkdir(parents=True, exist_ok=True)
     for c in [cam, ctsm, cice, mom6, cism, mosart]:
-        fields = sorted(c.scrape(Path(cesm) / c.REPO_PATH),
+        fields = sorted(c.scrape(Path(cesm) / c.REPO_PATH, chems) if c is cam else c.scrape(Path(cesm) / c.REPO_PATH),
                         key=lambda r: (r["name"] is None, r["name"] or r["name_expr"], r["source"]))
         if c is cam and configs:                  # which of CAM's registrations each configuration's namelist rules out
             for cname, config in configs.items():
