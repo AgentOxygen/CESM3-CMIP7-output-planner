@@ -26,7 +26,54 @@
     ocn: { file: "diag_table.unresolved", ocn: true },
   };
   const q = (s) => `'${s}'`;
-  
+
+  const WIDTH = 100;          // wrap lists here; Fortran namelist lines must stay under 132
+  // Pack pre-formatted items onto lines at most WIDTH wide: `first` starts the first line, `indent` the rest.
+  function pack(first, items, indent, sep) {
+    const lines = []; let cur = first, n = 0;
+    items.forEach((it, i) => {
+      const tok = it + (i < items.length - 1 ? sep : "");
+      if (n && cur.length + tok.length > WIDTH) { lines.push(cur.trimEnd()); cur = indent; n = 0; }
+      cur += tok; n++;
+    });
+    lines.push(cur.trimEnd());
+    return lines;
+  }
+
+  // Wrap comment lines (! or #) longer than WIDTH at word boundaries; the continuation keeps the comment character.
+  // Settings lines and the diag_table's field lines are never touched.
+  function wrapComments(text) {
+    return text.split("\n").flatMap(l => {
+      const m = l.match(/^([!#]+) (\S.*)$/);
+      if (!m || l.length <= WIDTH) return [l];
+      const cont = m[1] + "   ", out = [];
+      let cur = m[1] + " ", fresh = true;
+      for (const w of m[2].split(" ")) {
+        if (!fresh && cur.length + 1 + w.length > WIDTH) { out.push(cur); cur = cont + w; }
+        else { cur += (fresh ? "" : " ") + w; }
+        fresh = false;
+      }
+      return out.concat(cur);
+    }).join("\n");
+  }
+
+  // Closing blocks, so the settings come first: notes, what was left out (grouped by reason), and the names
+  // with no CESM3 source or run-log evidence at all (those can abort a run). `c` is the comment character.
+  function tail(rows, dropped, c, notes = []) {
+    const L = [];
+    if (notes.length) L.push("", `${c} --- notes ---`, ...notes);
+    if (dropped.length) {
+      const by = {};
+      for (const d of dropped) (by[d.why] ||= []).push(`${d.name} (${d.freq})`);
+      L.push("", `${c} --- not exported: ${dropped.length} line(s) ---`);
+      for (const [why, ns] of Object.entries(by)) L.push(`${c} ${why}: ${ns.length}`, ...pack(`${c}   `, ns, `${c}   `, ", "));
+    }
+    const bad = [...new Set(rows.filter(r => (r.items || []).some(x => x.t && !["verified", "source"].includes(x.t.st))).map(r => r.name))].sort();
+    if (bad.length) L.push("", `${c} --- no CESM3 source or run-log evidence (${bad.length}): an unknown name can abort the run ---`,
+                           ...pack(`${c}   `, bad, `${c}   `, ", "));
+    return L;
+  }
+
   // Evidence lines every generator adds: lines with no CESM3 evidence at all, and lines only the source (not a run) vouches for.
   const evidence = (meta, comment) => [
     ...(meta.unverified ? [`${comment} ${meta.unverified} line(s) have no CESM3 source or run-log evidence: an unknown name can abort the run.`] : []),
@@ -53,10 +100,9 @@
                  `! Swap this in for ${c.file} to get ${f} output instead of the default file.`] : []),
         ...evidence(meta, "!"),
         `! esm_history_vars REPLACES CISM's default variable list.`];
-      for (const d of dropped) L.push(`! not exported: ${d.name} (${d.freq}): ${d.why}`);
-      if (!f) return L.concat("! (nothing to export)").join("\n") + "\n";
+      if (!f) return L.concat("! (nothing to export)", tail(rows, dropped, "!")).join("\n") + "\n";
       return L.concat("", ` esm_history_vars = '${[...byFreq[f]].sort().join(" ")}'`,
-                      ` history_option = 'nyears'`, ` history_frequency = ${GLC_YEARS[f]}`).join("\n") + "\n";
+                      ` history_option = 'nyears'`, ` history_frequency = ${GLC_YEARS[f]}`, tail(rows, dropped, "!")).join("\n") + "\n";
     };
     return { text: one(freqs[0]), variants: freqs.slice(1).map(f => ({ freq: f, text: one(f, true) })), dropped };
   }
@@ -89,15 +135,14 @@
     const L = [...header(c, meta),
       `! CICE cannot switch its defaults off: fields below are ADDED to the model's default output, and these`,
       `! histfreq/histfreq_n REPLACE its stream layout (a default mask such as 'mdhxx' follows the new letters).`,
-      ...evidence(meta, "!"),
-      ...notes, ...dropped.map(d => `! not exported: ${d.name} (${d.freq}): ${d.why}`)];
-    if (!act.length) return { text: L.concat("! (nothing to export)").join("\n") + "\n", dropped };
+      ...evidence(meta, "!")];
+    if (!act.length) return { text: L.concat("! (nothing to export)", tail(rows, dropped, "!", notes)).join("\n") + "\n", dropped };
     const pad = (a, x) => a.concat(Array(5 - a.length).fill(x)).join(", ");
     L.push("", ` histfreq = ${pad(act.map(f => q(used[f])), q("x"))}`,
            ` histfreq_n = ${pad(act.map(f => ICE_STREAM[f][1]), 0)}`);
     for (const v of Object.keys(masks).sort())
       L.push(` f_${v} = ${q(act.map(f => used[f]).filter(l => masks[v].has(l)).join(""))}`);
-    return { text: L.join("\n") + "\n", dropped };
+    return { text: L.concat(tail(rows, dropped, "!", notes)).join("\n") + "\n", dropped };
   }
 
   // MOM6 diag_table. One file per (frequency, module); one line per field. [output, new-file, date format] per frequency.
@@ -125,9 +170,8 @@
       `# ${c.file}: ocean history for the selection on the page. ${meta.title || ""}`,
       `# Copy to SourceMods/src.mom/${c.file} in the case. It REPLACES CESM's default diag_table entirely.`,
       ...evidence(meta, "#"),
-      ...(notes.length ? [`# ${notes.length} name(s) are not in CESM's diag_table template and go to ocean_model; MOM6 writes them only if it registers them.`] : []),
-      ...dropped.map(d => `# not exported: ${d.name} (${d.freq}): ${d.why}`)];
-    if (!keys.length) return { text: L.concat("# (nothing to export)").join("\n") + "\n", dropped };
+      ...(notes.length ? [`# ${notes.length} name(s) are not in CESM's diag_table template and go to ocean_model; MOM6 writes them only if it registers them.`] : [])];
+    if (!keys.length) return { text: L.concat("# (nothing to export)", tail(rows, dropped, "#")).join("\n") + "\n", dropped };
     const fname = (f) => `"\${CASE}.mom6.h.${f.freq}.${MOM_TAG[f.mod]}.${MOM_FREQ[f.freq][2]}"`;
     L.push("", `"MOM6 diagnostic fields table for CESM case: \${CASE}"`, "1 1 1 0 0 0", "", "### Section-1: File List");
     for (const k of keys) {
@@ -138,20 +182,108 @@
     for (const k of keys) {
       const f = files[k];
       L.push(`# ${fname(f)}`);
-      const seen = new Set();
+      const seen = new Set(), lines = [];
       for (const x of f.fields.sort((a, b) => a.name.localeCompare(b.name) || a.tail.localeCompare(b.tail))) {
         let alias = x.name + x.tail;                       // a second method on one field needs its own output name
         if (seen.has(alias)) continue;
         seen.add(alias);
-        L.push(`"${f.mod}", "${x.name}", "${alias}", ${fname(f)}, "all", "${x.red}", "none", 2`);
+        lines.push([`"${f.mod}",`, `"${x.name}",`, `"${alias}",`, `${fname(f)},`, `"all",`, `"${x.red}",`, `"none",`, "2"]);
       }
+      const w = lines[0].map((_, i) => Math.max(...lines.map(l => l[i].length)));   // align the columns within a file
+      for (const l of lines) L.push(l.map((t, i) => i < l.length - 1 ? t.padEnd(w[i]) : t).join(" "));
       L.push("");
     }
-    return { text: L.join("\n") + "\n", dropped };
+    return { text: L.concat(tail(rows, dropped, "#")).join("\n") + "\n", dropped };
   }
 
-  // rows: [{name, method, freq, items}]  ->  {text, tapes, dropped} | {error}
+  // --- validation -----------------------------------------------------------
+  // Read the generated text back and check it, so a bug in the generator (or a hand edit) shows up.
+  // Returns {errors, warnings}. For CAM/CTSM/MOSART it also checks the round trip: the (name, flag, frequency)
+  // lines in the file must be exactly the requested rows minus the reported drops.
+  const NL_FREQ = Object.fromEntries(Object.entries(FREQ).map(([f, [n]]) => [n, f]));
+
+  // `key = value` statements of a namelist (continuation lines join the statement before them), comments stripped.
+  function statements(text) {
+    const out = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.replace(/!.*$/, "");
+      if (!line.trim()) continue;
+      const m = line.match(/^\s*([A-Za-z_][\w]*)\s*=\s*(.*)$/);
+      if (m) out.push([m[1].toLowerCase(), m[2], m[1]]); else if (out.length) out[out.length - 1][1] += " " + line.trim();
+    }
+    return out;
+  }
+  const quoted = (v) => [...v.matchAll(/'([^']*)'/g)].map(m => m[1]);
+
+  function validate(comp, text, rows, dropped, meta = {}) {
+    const c = COMPONENTS[comp], errors = [], warnings = [];
+    if (!c.ocn) text.split("\n").forEach((l, i) => { if (l.length > 132) errors.push(`line ${i + 1} is ${l.length} characters; Fortran namelist lines must be under 132`); });
+    const st = statements(text), get = (k) => (st.find(x => x[0] === k) || [])[1];
+    for (const [k, v] of st) if ((v.match(/'/g) || []).length % 2) errors.push(`${k}: unbalanced quotes`);
+    if (c.ice) {
+      const letters = quoted(get("histfreq") || ""), n = (get("histfreq_n") || "").split(",").length;
+      if (letters.length !== 5 || n !== 5) errors.push(`histfreq/histfreq_n must each list 5 streams (found ${letters.length} and ${n})`);
+      const valid = new Set(meta.iceFields || []);
+      for (const [k, v, orig] of st) if (k.startsWith("f_")) {
+        if (valid.size && !valid.has(orig.slice(2))) errors.push(`${k}: not a CICE history field`);
+        for (const ch of quoted(v).join("")) if (!letters.includes(ch)) errors.push(`${k}: stream '${ch}' is not in histfreq`);
+      }
+    } else if (c.glc) {
+      const names = (quoted(get("esm_history_vars") || "").join("").split(/\s+/)).filter(Boolean);
+      if (new Set(names).size !== names.length) errors.push("esm_history_vars lists a variable twice");
+      if (names.length && !Number.isInteger(+get("history_frequency"))) errors.push("history_frequency is not an integer");
+    } else if (c.ocn) {
+      const files = new Set([...text.matchAll(/^("\$\{CASE\}[^"]*"), \d+, "\w+", 1, "days"/gm)].map(m => m[1])), seen = new Set();
+      for (const m of text.matchAll(/^"(\w+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*("[^"]+")\s*,/gm)) {
+        if (!files.has(m[4])) errors.push(`field ${m[2]} writes to ${m[4]}, which is not in the file list`);
+        if (seen.has(m[4] + m[3])) errors.push(`output name ${m[3]} appears twice in ${m[4]}`);
+        seen.add(m[4] + m[3]);
+        if (meta.momFields && !(meta.momFields[m[1]] || []).includes(m[2]) && m[1] !== "ocean_model") warnings.push(`${m[2]} is not in ${m[1]}`);
+      }
+    } else {
+      const nh = (get(`${c.pre}nhtfrq`) || "").split(",").map(x => x.trim()).filter(Boolean), n = nh.length;
+      for (const k of ["mfilt", ...(c.dov2xy ? ["dov2xy"] : [])]) {
+        const len = (get(c.pre + k) || "").split(",").filter(x => x.trim()).length;
+        if (len !== n) errors.push(`${c.pre}${k} lists ${len} values but ${c.pre}nhtfrq lists ${n}`);
+      }
+      if (c.empty && !/\.true\./i.test(get(c.empty) || "")) errors.push(`${c.empty} is not .true.`);
+      const got = new Set(), fincl = st.filter(x => x[0].startsWith(c.pre + "fincl"));
+      if (fincl.length !== n) errors.push(`${fincl.length} fincl lists for ${n} tapes`);
+      for (const [k, v] of fincl) {
+        const i = +k.slice((c.pre + "fincl").length), freq = NL_FREQ[nh[i - 1]], seen = new Set();
+        if (!(i >= 1 && i <= n)) { errors.push(`${k}: no tape ${i}`); continue; }
+        for (const e of quoted(v)) {
+          const [name, flag = ""] = e.split(":");
+          if (seen.has(name)) errors.push(`${k}: ${name} appears twice on one tape`);
+          seen.add(name);
+          if (name.length > c.maxName) errors.push(`${k}: ${name} is longer than ${c.maxName} characters`);
+          if (flag && !c.flags.includes(flag)) errors.push(`${k}: ${e} has averaging flag ${flag}, not valid for ${comp}`);
+          got.add(`${name}|${flag}|${freq}`);
+        }
+      }
+      const gone = new Set(dropped.map(d => `${d.name}|${d.method || ""}|${d.freq}`));
+      const want = new Set(rows.map(r => `${r.name}|${r.method || ""}|${r.freq}`).filter(k => !gone.has(k)));
+      const show = (a, b) => [...a].filter(x => !b.has(x)).slice(0, 5).map(x => x.replace(/\|/g, " ")).join(", ");
+      if (show(want, got)) errors.push(`requested but missing from the file: ${show(want, got)}`);
+      if (show(got, want)) errors.push(`in the file but not requested: ${show(got, want)}`);
+    }
+    return { errors, warnings };
+  }
+
+  // rows: [{name, method, freq, items}]  ->  {text, tapes, dropped, validation} | {error}
   function build(comp, rows, meta = {}) {
+    const o = buildText(comp, rows, meta);
+    if (o.error) return o;
+    o.text = wrapComments(o.text);
+    o.validation = validate(comp, o.text, rows, o.dropped || [], meta);
+    const { errors, warnings } = o.validation, c = COMPONENTS[comp].ocn ? "#" : "!";
+    if (errors.length || warnings.length)
+      o.text += ["", `${c} --- VALIDATION: ${errors.length} error(s), ${warnings.length} warning(s) ---`,
+                 ...errors.map(e => `${c} ERROR: ${e}`), ...warnings.map(w => `${c} warning: ${w}`)].join("\n") + "\n";
+    return o;
+  }
+
+  function buildText(comp, rows, meta) {
     const c = COMPONENTS[comp];
     if (!c) return { error: `no namelist generator for ${comp}` };
     if (c.glc) return buildGlc(c, rows, meta);
@@ -162,7 +294,7 @@
       const why = !FREQ[r.freq] ? `frequency ${r.freq} has no history setting`
         : r.name.length > c.maxName ? `name longer than ${c.maxName} characters`
         : r.method && !c.flags.includes(r.method) ? `averaging flag ${r.method} not valid for ${comp}` : "";
-      if (why) { dropped.push({ name: r.name, freq: r.freq, why }); continue; }
+      if (why) { dropped.push({ name: r.name, method: r.method, freq: r.freq, why }); continue; }
       // A name may appear once per tape; a second method at the same frequency opens another tape.
       const tapes = (byFreq[r.freq] ||= []);
       let t = tapes.find(x => !x.names.has(r.name));
@@ -180,18 +312,18 @@
                        : `! ${comp} cannot switch its defaults off: the fields below are ADDED to the model's default output.`,
                ...evidence(meta, "!"),
                `! nhtfrq assumes a 365-day calendar for yr and dec. Unverified by running a case.`];
-    for (const d of dropped) L.push(`! not exported: ${d.name} (${d.freq}): ${d.why}`);
-    if (!tapes.length) return { text: L.concat("! (nothing to export)").join("\n") + "\n", tapes, dropped };
+    if (!tapes.length) return { text: L.concat("! (nothing to export)", tail(rows, dropped, "!")).join("\n") + "\n", tapes, dropped };
+    L.push("", "! tape  frequency  nhtfrq  mfilt  fields",
+           ...tapes.map((t, i) => `! h${i}`.padEnd(7) + t.freq.padEnd(11) + String(FREQ[t.freq][0]).padEnd(8) + String(FREQ[t.freq][1]).padEnd(7) + t.entries.length));
     L.push("", ...(c.empty ? [` ${c.empty} = .true.`] : []),
            ` ${c.pre}nhtfrq = ${tapes.map(t => FREQ[t.freq][0]).join(", ")}`,
            ` ${c.pre}mfilt = ${tapes.map(t => FREQ[t.freq][1]).join(", ")}`);
     if (c.dov2xy) L.push(` ${c.pre}dov2xy = ${tapes.map(() => ".true.").join(", ")}`);
     tapes.forEach((t, i) => {
-      L.push("", `! h${i} -- ${t.freq}`);
-      t.entries.sort().forEach((e, k) =>
-        L.push(` ${k ? "   " : `${c.pre}fincl${i + 1} = `}${q(e)}${k < t.entries.length - 1 ? "," : ""}`));
+      L.push("", `! h${i} -- ${t.freq} (${t.entries.length} fields)`,
+             ...pack(` ${c.pre}fincl${i + 1} = `, t.entries.sort().map(q), "    ", ","));
     });
-    return { text: L.join("\n") + "\n", tapes, dropped };
+    return { text: L.concat(tail(rows, dropped, "!")).join("\n") + "\n", tapes, dropped };
   }
 
   // Uncompressed ("stored") zip: [{name, text}] -> Uint8Array. No dependency; CRC-32 is the only arithmetic.
@@ -231,6 +363,6 @@
     return [{ name: c.file, text: o.text }, ...(o.variants || []).map(v => ({ name: `variants/${c.file}.${v.freq}`, text: v.text }))];
   }
 
-  root.Namelist = { build, files, zip, COMPONENTS, FREQ };
+  root.Namelist = { build, validate, files, zip, COMPONENTS, FREQ };
   if (typeof module !== "undefined") module.exports = root.Namelist;
 })(typeof window !== "undefined" ? window : globalThis);
