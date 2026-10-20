@@ -2,6 +2,8 @@
 
 import json
 
+import yaml
+
 import build
 
 
@@ -43,8 +45,8 @@ def test_sizes_are_priced_lines_that_span_every_config():
     assert b["sizes"]
     for key, s in b["sizes"].items():
         assert len(s["b"]) == n and (any(x is not None for x in s["b"]) or s.get("x")), key   # x: why nowhere
-    # every priced line's key is a real component|name from the request
-    used = {f"{t['c']}|{t['n']}" for r in b["requests"] for t in r["t"] if t["c"]}
+    # every priced line's key is a real component|name from the request or the additions
+    used = {f"{t['c']}|{t['n']}" for r in b["requests"] for t in r["t"] if t["c"]} | {f"{a['c']}|{a['n']}" for a in b["additional"]}
     assert set(b["sizes"]) <= used
 
 
@@ -53,6 +55,33 @@ def test_known_answer_trefht_on_ne30pg3():
     b = json.loads(build.BUNDLE.read_text())
     keys = [c["key"] for c in b["configs"]]
     assert b["sizes"]["atm|TREFHT"]["b"][keys.index("ne30pg3_t233|cam7-mt")] == 48600 * 4
+
+
+def test_additional_section():
+    b = json.loads(build.BUNDLE.read_text())
+    assert b["per_year"]["5day"] == 73
+    assert "5day" not in {r["f"] for r in b["requests"]}                 # an additions-only frequency
+    for a in b["additional"]:
+        assert set(a) == {"n", "m", "f", "c", "g", "tp", "as", "st", "sc", "ref", "rq"}
+        assert a["c"] in b["components"] and a["f"] in b["per_year"] and a["st"] in ("source", "unconfirmed")
+        assert (a["st"] == "source") == bool(a["ref"])
+
+
+def test_additional_names_are_sized_like_request_names(tmp_path, monkeypatch):
+    src = tmp_path / "req.yaml"
+    tok = {"component": "atm", "name": "T", "dims": ["lev"], "horizontal": "physgrid"}
+    src.write_text(yaml.safe_dump({"requests": [], "experiments": {}, "additional": [
+        {**tok, "freq": "5day", "method": "A", "group": "simone-tapes", "tape": "h9", "assumed": False,
+         "status": "source", "source_certainty": "literal", "source_ref": "x:1", "requested": False},
+        {**tok, "name": "GHOST", "dims": None, "horizontal": None, "freq": "mon", "method": "A",
+         "group": "chemistry-only", "tape": None, "assumed": True, "status": "unconfirmed",
+         "source_certainty": None, "source_ref": None, "requested": False}]}))
+    monkeypatch.setattr(build, "SOURCE", src)
+    b = build.build_bundle()
+    keys = [c["key"] for c in b["configs"]]
+    assert b["sizes"]["atm|T"]["b"][keys.index("ne30pg3_t233|cam7-mt")] == 48600 * 93 * 4
+    assert "atm|GHOST" not in b["sizes"]                                  # unresolved: unpriced, not guessed
+    assert [a["n"] for a in b["additional"]] == ["T", "GHOST"]
 
 
 def test_per_year_leaves_fx_and_subhr_unpriced():

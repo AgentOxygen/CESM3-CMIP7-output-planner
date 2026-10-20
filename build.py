@@ -35,7 +35,8 @@ COLON_COMPONENTS = ["atm", "lnd"]
 # CMIP7 frequency -> samples per simulated year (365-day calendar). `fx` is a
 # one-off file and `subhr` depends on a model timestep this tool does not know,
 # so neither has a per-year volume; the page shows those lines as unpriced.
-PER_YEAR = {"yr": 1, "dec": 0.1, "mon": 12, "day": 365,
+# `5day` is not a CMIP7 frequency: only additional variables use it (Simone's h9 tape, nhtfrq = -120).
+PER_YEAR = {"yr": 1, "dec": 0.1, "mon": 12, "5day": 73, "day": 365,
             "6hr": 1460, "3hr": 2920, "1hr": 8760}
 DEFAULT_CONFIG = "ne30pg3_t233|cam7-mt"        # the BHISTE_MTt4s baseline
 BYTES = 4                                       # history files are written as 4-byte floats (ndens = 2)
@@ -95,8 +96,10 @@ def build_sizes(tokens):
 
 def build_bundle():
     doc = yaml.safe_load(SOURCE.read_text())
+    additional = doc.get("additional") or []
     wanted = {(t["component"], t["name"], tuple(t["dims"]) if t["dims"] is not None else None, t["horizontal"])
-              for r in doc["requests"] for t in r["tokens"] if t["component"] and (t["dims"] is not None or t["horizontal"])}
+              for t in [t for r in doc["requests"] for t in r["tokens"]] + additional
+              if t["component"] and (t["dims"] is not None or t["horizontal"])}
     sizes, configs = build_sizes(wanted)
     requests = [{
         "n": r["name"], "u": r["uid"], "l": r["source_line"], "raw": r["raw_cesm_name"],
@@ -119,7 +122,10 @@ def build_bundle():
             "per_year": PER_YEAR, "sizes": sizes,
             "mom_fields": yaml.safe_load((ROOT / "data" / "mom_fields.yaml").read_text()),
             "cice_fields": yaml.safe_load((ROOT / "data" / "cice_fvars.yaml").read_text()),
-            "experiments": doc["experiments"], "requests": requests}
+            "experiments": doc["experiments"], "requests": requests,
+            "additional": [{"n": a["name"], "m": a["method"], "f": a["freq"], "c": a["component"], "g": a["group"],
+                            "tp": a["tape"], "as": a["assumed"], "st": a["status"], "sc": a["source_certainty"],
+                            "ref": a["source_ref"], "rq": a["requested"]} for a in additional]}
 
 
 def dump_bundle(bundle):
@@ -127,12 +133,13 @@ def dump_bundle(bundle):
     readably."""
     j = lambda o: json.dumps(o, separators=(",", ":"))
     head = {k: v for k, v in bundle.items()
-            if k not in ("experiments", "requests", "sizes")}
+            if k not in ("experiments", "requests", "sizes", "additional")}
     lines = [j(head)[:-1] + ',', '"sizes":{',
              ",\n".join(f"{j(k)}:{j(v)}" for k, v in bundle["sizes"].items()),
              '},', '"experiments":{']
     lines.append(",\n".join(f"{j(k)}:{j(v)}" for k, v in bundle["experiments"].items()))
-    lines += ['},', '"requests":[', ",\n".join(j(r) for r in bundle["requests"]), "]}"]
+    lines += ['},', '"additional":[', ",\n".join(j(a) for a in bundle["additional"]), '],',
+              '"requests":[', ",\n".join(j(r) for r in bundle["requests"]), "]}"]
     return "\n".join(lines) + "\n"
 
 

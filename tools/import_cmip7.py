@@ -38,6 +38,7 @@ so `make build`/`make test` work for anyone without the reference data.
 """
 
 import csv
+from collections import Counter
 import fnmatch
 import re
 import sys
@@ -64,6 +65,9 @@ PRIORITY_LEVEL_CSV = ROOT / "reference" / "cmip7-data-request" / "Priority Level
 LOG_FIELDS_YAML = ROOT / "reference" / "log_files" / "extracted_fields.yaml"
 OUTPUT = ROOT / "data" / "cmip7_request.yaml"
 ALIASES_YAML = ROOT / "data" / "aliases.yaml"
+# Hand-maintained variables added on top of the request for the MTt4s configuration (Simone's CAM
+# history additions); see build_additional. Absent => an empty `additional:` section.
+ADDITIONAL_YAML = ROOT / "data" / "additional_variables.yaml"
 
 # --- Which CESM3 build the statuses describe: change these together. ---
 # CATALOGUE is a cesm-field-scraper output directory (local-only, like reference/: `out` is
@@ -446,9 +450,54 @@ def build_requests():
     return requests, dict(sorted(experiments.items()))
 
 
-def render(requests, experiments, source_configuration=None):
+def load_additional(path=None):
+    """(default component, entries) from data/additional_variables.yaml; (None, []) if absent."""
+    path = Path(path or ADDITIONAL_YAML)
+    if not path.exists():
+        return None, []
+    doc = yaml.safe_load(path.read_text()) or {}
+    return doc.get("component"), doc.get("additional") or []
+
+
+def build_additional(requests, src_index=None, aliases=None, path=None):
+    """One record per data/additional_variables.yaml entry, resolved against the source catalogue the way
+    sheet tokens are (SOURCE_CONFIG, aliases, `source_hits`), but with no log and no realm:
+
+      status     source       the source registers it (component, certainty and ref from that record)
+                 unconfirmed  it does not, for SOURCE_CONFIG; still listed, with no CESM3 source evidence
+      component  the file's default component if its source registers the name, else the first other
+                 component that does, else the default
+      requested  a CMIP7 sheet token already asks for the same (component, name, method, freq)
+
+    Never `verified`: the only run log is an MTso run, and these are MTt4s additions."""
+    default, entries = load_additional(path)
+    if bad := [e for e in entries if not isinstance(e.get("name"), str)]:     # YAML reads a bare NO as false
+        raise DataError(f"{rel(Path(path or ADDITIONAL_YAML))}: quote these names: {bad}")
+    aliases = load_aliases() if aliases is None else aliases
+    asked = {(t["component"], t["name"], t["method"], r["frequency"]) for r in requests for t in r["tokens"]}
+    out = []
+    for e in entries:
+        alias_of, hits = None, source_hits(e["name"], src_index)
+        for candidate in alias_candidates(e["name"], aliases)[1:] if not hits else []:
+            if found := source_hits(candidate, src_index):
+                alias_of, hits = candidate, found
+                break
+        hits.sort(key=lambda h: (h[0] != default, h[1] != "exact"))
+        component, _, certainty, ref, dims, horizontal = hits[0] if hits else (default, None, None, None, None, None)
+        out.append({
+            "name": e["name"], "freq": e["freq"], "method": e.get("method"), "group": e["group"],
+            "tape": e.get("tape"), "assumed": bool(e.get("assumed", False)),
+            "component": component, "status": "source" if hits else "unconfirmed", "alias_of": alias_of,
+            "source_certainty": certainty, "source_ref": ref, "dims": dims, "horizontal": horizontal,
+            "requested": (component, e["name"], e.get("method"), e["freq"]) in asked,
+        })
+    return out
+
+
+def render(requests, experiments, source_configuration=None, additional=()):
     return HEADER + yaml.safe_dump(
-        {"source_configuration": source_configuration, "requests": requests, "experiments": experiments}, sort_keys=False,
+        {"source_configuration": source_configuration, "requests": requests, "experiments": experiments,
+         "additional": list(additional)}, sort_keys=False,
         default_flow_style=False, allow_unicode=True, width=1000)
 
 
@@ -458,6 +507,14 @@ HEADER = """\
 # reference/log_files/extracted_fields.yaml + the cesm-field-scraper catalogue of `source_configuration`.
 # Do not hand-edit -- regenerate with `make import-cmip7` whenever the CMIP7
 # request CSVs change. The join rules are in that script's docstring.
+#
+# `additional:` (from data/additional_variables.yaml, variables added on top of the request for
+# MTt4s; not CMIP7): one entry per name x freq x method, with
+#   name, freq (a CMIP7 label or 5day), method (CESM averaging flag), group, tape (or null), assumed
+#   component   where the source catalogue registers it (the file's default when nowhere)
+#   status      source (registered for source_configuration) | unconfirmed (not registered)
+#   alias_of, source_certainty, source_ref, dims, horizontal   as for request tokens
+#   requested   true when a request token already asks for the same component/name/method/freq
 
 """
 
@@ -480,7 +537,10 @@ def main():
               f"reference/.gitignore). {rel(OUTPUT)} left as-is.")
         return
     requests, experiments = build_requests()
-    OUTPUT.write_text(render(requests, experiments, source_configuration()))
+    if not ADDITIONAL_YAML.exists():
+        print(f"no {rel(ADDITIONAL_YAML)}: `additional:` left empty")
+    additional = build_additional(requests, load_source_index())
+    OUTPUT.write_text(render(requests, experiments, source_configuration(), additional))
     by_status = {}
     for r in requests:
         for t in r["tokens"]:
@@ -488,7 +548,8 @@ def main():
     no_name = sum(1 for r in requests if not r["tokens"])
     print(f"{rel(OUTPUT)}: {len(requests)} requests, {len(experiments)} "
           f"experiments; tokens by status {by_status}; "
-          f"{no_name} requests with no CESM name (missing)")
+          f"{no_name} requests with no CESM name (missing); {len(additional)} additional, by status "
+          f"{dict(sorted(Counter(a['status'] for a in additional).items()))}")
 
 
 if __name__ == "__main__":
