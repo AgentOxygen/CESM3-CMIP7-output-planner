@@ -49,7 +49,7 @@ SIGNATURES = {
 
 
 MARBL_YAML = "externals/MARBL/defaults/diagnostics_latest.yaml"
-MARBL_VERTICAL = {"none": [], "layer_avg": ["zl"]}       # MARBL's vertical_grid -> dims; anything else fails loudly
+MARBL_VERTICAL = {"none": [], "layer_avg": ["zl"], "layer_iface": ["zi"]}       # MARBL's vertical_grid -> dims; anything else fails loudly
 MARBL_OPERATOR = {"average": "A", "instantaneous": "I", "minimum": "M", "maximum": "X", "sum": "SUM"}
 
 

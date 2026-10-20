@@ -130,11 +130,12 @@ def assignments(stmts):
 
     Covers `ptendnam(m) = 'PTE'//cnst_name(m)` and
     `character(len=*), parameter :: vr_suffix = "_vr"`. File-wide, blind to
-    which subroutine an assignment is in.
+    which subroutine an assignment is in. Also `tmpname = cnst_name(l)`, so a
+    name built from a copy of a constituent name expands like the original.
     """
     env = {}
     for _, text in stmts:
-        if "'" not in text and '"' not in text:
+        if "'" not in text and '"' not in text and not re.search(r"=\s*(?:trim\s*\(\s*)?cnst_name(?:_cw)?\s*\(", text, re.I):
             continue
         m = re.match(r"^(?:[^'\"]*::\s*)?([A-Za-z_]\w*)\s*(?:\([^='\"]*\))?\s*=(?!=)\s*(.+)$", text, re.S)
         if m:
@@ -156,12 +157,12 @@ def expand(text, env, known=None, depth=0):
     known = known or {}
     alts = [""]
     for part in _split(text, "//"):
-        part = _unwrap(part)
+        part = re.sub(r"\([^()]*\)%", "%", _unwrap(part))     # `fields(i)%fldnam` -> `fields%fldnam`
         value = _string(part)
         if value is not None:
             options = [value]
         else:
-            ref = re.match(r"^([A-Za-z_]\w*)\s*(\(.*\))?$", part, re.S)
+            ref = re.match(r"^([A-Za-z_][\w%]*)\s*(\(.*\))?$", part, re.S)
             var = ref.group(1).lower() if ref else None
             index = ref.group(2)[1:-1].strip().lower() if ref and ref.group(2) else None
             fixed = known.get("__index__", {}).get(index)          # `cnst_name(ixcldice)`: one named constituent
@@ -176,7 +177,7 @@ def expand(text, env, known=None, depth=0):
                 options = sorted({o for rhs in env[var] for o in
                                   (literal_list(rhs) if rhs.lstrip().startswith("(/") and not isinstance(literal_list(rhs), Expr)
                                    else expand(rhs, env, known, depth + 1))})
-                if var == "diag" and index == "icall":
+                if var == "diag" and index and index.replace(" ", "") in ("icall", "icall-1"):   # icall-1: CCPP rrtmgp diagnostics
                     # radiation's extra diagnostic calls ('_d1'..'_d10') exist only if the namelist asks for them
                     options = [o for o in options if o == ""] or options
             else:

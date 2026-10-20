@@ -55,10 +55,10 @@ The console shows page errors and failed resource loads (favicon requests are fi
 
 ## import_cmip7.py — regenerates data/cmip7_request.yaml
 
-`make import-cmip7`. Joins the CMIP7 request (`reference/CESM3_current.csv`,
+`make import-cmip7`. Joins the CMIP7 request (`reference/CESM3_current_v2.csv`,
 priority CSVs) to CESM3 run-log field lists
 (`reference/log_files/extracted_fields.yaml`) and the CESM3 source catalogue
-(`cesm-field-scraper/out`), writing the committed `data/cmip7_request.yaml`. The inputs are local-only; without them
+(`CATALOGUE`, `cesm-field-scraper/out-alpha11d`, under `SOURCE_CONFIG`), writing the committed `data/cmip7_request.yaml`. The inputs are local-only; without them
 the script prints why and leaves the file alone. See its docstring for the
 status and component-source rules.
 

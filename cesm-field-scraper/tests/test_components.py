@@ -208,7 +208,129 @@ def test_cam_named_constituent_index_and_list_initialiser(tmp_path):
         call cnst_get_ind('CLDICE', ixcldice)
         call addfld(ptendnam(ixcldice), (/ 'lev' /), 'A', 'kg/kg/s', 'x')
         call addfld('FLUT'//diag(icall), horiz_only, 'A', 'W/m2', 'olr')
+        call history_add_field('FSNT'//diag(icall-1), 'Net solar flux', horiz_only, 'avg', 'W m-2')
         """)
     r = {x["name"]: x for x in cam.scrape(root)}
     assert "PTECLDICE" in r and "PTECLDLIQ" not in r        # one constituent, not all of them
     assert "FLUT" in r and "FLUT_d1" not in r              # the list initialiser (first entry), not FLUT*
+    assert "FSNT" in r and "FSNT_d1" not in r
+
+
+def test_cam_per_chemistry_package(tmp_path):
+    """alpha11d shapes: a constituent name copied to a local first (modal_aero_*_cam.F90), reaction
+    tags and rate sums from the mechanism, and constituents that only one package has."""
+    root = tmp_path / cam.REPO_PATH
+    write(root, cam.CONSTITUENT_ARRAYS[0][0], "cnst_names(1) = (/'CLDLIQ'/)\n")
+    write(root, "src/chemistry/pp_big/mo_sim_dat.F90", """
+        solsym(: 2) = (/ 'O3S ', 'SO2 ' /)
+        rxt_tag_lst(1:2) = (/ 'jno2      ', 'usr_NO2_OH' /)
+        """)
+    write(root, "src/chemistry/pp_small/mo_sim_dat.F90", "solsym(: 1) = (/ 'SO2 ' /)\n")
+    write(root, "src/physics/cam/constituents.F90", "sflxnam(m) = 'SF'//cnst_name(m)\n")
+    write(root, "bld/namelist_files/namelist_defaults_cam.xml", """
+        <rxn_rate_sums chem="big">
+          'O3_Loss = OH_O3 + HO2_O3', 'OddOx_Loss_Tot = 2.0*O_O3'
+        </rxn_rate_sums>
+        """)
+    write(root, "src/chemistry/modal_aero/coag_cam.F90", """
+        tmpname = cnst_name(l)
+        fieldname = trim(tmpname) // '_sfcoag1'
+        call addfld( fieldname, horiz_only, 'A', unit, long_name )
+        """)
+    write(root, "src/chemistry/mozart/mo_gas_phase_chemdr.F90",
+          "call addfld( tag_names(n), (/ 'lev' /), 'I', '/s', 'photolysis rate constant' )\n")
+    write(root, "src/chemistry/mozart/rate_diags.F90", """
+        call addfld(rate_names(i), (/ 'lev' /),'A', 'molecules/cm3/sec','reaction rate')
+        call addfld( grp%name, (/ 'lev' /),'A', 'molecules/cm3/sec','reaction rate group')
+        """)
+    write(root, "src/chemistry/pp_small/exp_sol.F90",
+          "call addfld( trim(solsym(j))//'_CHML', (/ 'lev' /), 'I', '/cm3/s', 'chemical loss rate' )\n")
+    r = {}
+    for x in cam.scrape(root, ["big", "small"]):
+        r.setdefault(x["name"], []).append(x)
+    assert "chem" not in r["SO2_sfcoag1"][0]["requires"]                            # both packages
+    assert r["O3S_sfcoag1"][0]["requires"]["chem"] == ["big"]                       # only one
+    assert {"jno2", "usr_NO2_OH", "r_jno2", "r_NO2_OH", "O3_Loss", "OddOx_Loss_Tot"} <= set(r)
+    assert r["O3_Loss"][0]["requires"] == {"chem": ["big"]}
+    assert r["SO2_CHML"][0]["requires"] == {"chem": ["small"]} and "O3S_CHML" not in r   # pp_small/: its own package only
+    # a package whose expansion gives up (too many names) doesn't make the other's names exclusive
+    write(root, "src/chemistry/pp_big/mo_sim_dat.F90", "solsym(: 2) = (/ " + ", ".join(f"'S{i}'" for i in range(500)) + " /)\n")
+    r = {x["name"]: x for x in cam.scrape(root, ["big", "small"])}
+    assert "chem" not in r["SO2_sfcoag1"]["requires"] and None in r
+
+
+def test_cam_calcsize_and_tracer_cnst(tmp_path):
+    """modal_aero_calcsize_cam names from the package's modes; tracer_cnst from build-namelist's specifiers."""
+    root = tmp_path / cam.REPO_PATH
+    write(root, cam.CONSTITUENT_ARRAYS[0][0], "cnst_names(1) = (/'CLDLIQ'/)\n")
+    write(root, cam.CONSTITUENT_ARRAYS[1][0], """
+        solsym(: 6) = (/ 'num_a1', 'num_a2', 'num_a3', 'so4_a1', 'so4_a2', 'bc_a1 ' /)
+        inv_lst(: 3) = (/ 'M   ', 'O3  ', 'OH  ' /)
+        """)
+    write(root, "src/physics/cam/constituents.F90", "sflxnam(m) = 'SF'//cnst_name(m)\n")
+    write(root, "bld/build-namelist", """
+        add_default($nl, 'tracer_cnst_specifier', 'val'=>"'O3','OH','NO3'");
+        """)
+    write(root, "src/chemistry/utils/modal_aero_calcsize_cam.F90", """
+        tmpnamea = cnst_name(numptr_amode(n))
+        tmpnamea = cnst_name_cw(numptrcw_amode(n))
+        fieldname = trim(tmpnamea) // '_sfcsiz1'
+        call addfld( fieldname, horiz_only, 'A', unit, long_name )
+        tmpnamea = cnst_name(lsfrm)
+        tmpnameb = cnst_name(lstoo)
+        fieldname = trim(tmpnameb) // '_sfcsiz3'
+        call addfld( fieldname, horiz_only, 'A', unit, long_name )
+        """)
+    write(root, "src/chemistry/mozart/tracer_cnst.F90",
+          "call addfld(trim(fields(i)%fldnam), (/ 'lev' /), 'I','mol/mol', 'prescribed tracer constituent' )\n")
+    write(root, "src/chemistry/mozart/mo_setinv.F90",
+          "call addfld( trim(inv_lst(i))//'_vmr',  (/ 'lev' /),'A', 'mole/mole', 'invariant density' )\n")
+    names = {x["name"] for x in cam.scrape(root)}
+    assert {n for n in names if "sfcsiz" in n} == {
+        "num_a1_sfcsiz1", "num_a2_sfcsiz1", "num_a3_sfcsiz1", "num_c1_sfcsiz1", "num_c2_sfcsiz1", "num_c3_sfcsiz1",
+        "num_a1_sfcsiz3", "so4_a1_sfcsiz3", "num_c1_sfcsiz3", "so4_c1_sfcsiz3"}       # aitken -> accum namesakes only
+    assert {"O3", "OH", "M_vmr", "O3_vmr"} <= names and "NO3" not in names         # NO3 isn't an invariant here
+    write(root, "src/chemistry/modal_aero/x.F90", """
+        tmpnamea = cnst_name_cw(l)
+        call addfld( trim(tmpnamea)//'_sfgaex2', horiz_only, 'A', unit, long_name )
+        """)
+    names = {x["name"] for x in cam.scrape(root)}
+    assert {"so4_c2_sfgaex2", "num_c1_sfgaex2"} <= names and "CLDLIQ_sfgaex2" not in names
+
+
+def test_cam_modal_tendency_species():
+    """ghg_mam4's constituents give exactly the names its MTso run log registers."""
+    cnst = ["Q", "H2SO4", "SOAG", "bc_a1", "bc_a4", "dst_a1", "dst_a2", "dst_a3", "ncl_a1", "ncl_a2", "ncl_a3",
+            "num_a1", "num_a2", "num_a3", "num_a4", "pom_a1", "pom_a4", "so4_a1", "so4_a2", "so4_a3", "soa_a1", "soa_a2"]
+    m = cam.modal_names(cnst)
+    assert sorted(m["_sfgaex1"]["a"]) == sorted(["H2SO4", "SOAG", "bc_a1", "bc_a4", "num_a1", "num_a4", "pom_a1",
+                                                 "pom_a4", "so4_a1", "so4_a2", "so4_a3", "soa_a1", "soa_a2"])
+    a2 = ["dst_a1", "dst_a2", "dst_a3", "ncl_a1", "ncl_a2", "ncl_a3", "num_a1", "num_a2", "num_a3",
+          "so4_a1", "so4_a2", "so4_a3", "soa_a1", "soa_a2"]
+    assert sorted(m["_sfgaex2"]["a"]) == sorted(a2 + [n.replace("_a", "_c") for n in a2])
+    assert sorted(m["_sfcoag1"]["a"]) == sorted(["bc_a1", "bc_a4", "dst_a1", "dst_a2", "ncl_a1", "ncl_a2", "num_a1",
+                                                 "num_a2", "num_a4", "pom_a1", "pom_a4", "so4_a1", "so4_a2", "soa_a1", "soa_a2"])
+    assert m["_sfnnuc1"]["a"] == ["H2SO4", "num_a2", "so4_a2"]
+
+
+def test_cam_aerosol_drydep_list_and_age_of_air_tracers(tmp_path):
+    """drydep_list: the package's species in the master aer drydep list (not the blank default);
+    aoa_tracers: the module's own c_names, registered only where `aoa_tracers` is on."""
+    root = tmp_path / cam.REPO_PATH
+    write(root, cam.CONSTITUENT_ARRAYS[0][0], "cnst_names(1) = (/'CLDLIQ'/)\n")
+    write(root, cam.CONSTITUENT_ARRAYS[1][0], "solsym(: 4) = (/ 'num_a1', 'so4_a1', 'SO2   ', 'O3    ' /)\n")
+    write(root, "src/physics/cam/constituents.F90", "sflxnam(m) = 'SF'//cnst_name(m)\n")
+    write(root, "bld/namelist_files/mozart_master_aer_drydep_list.xml",
+          "<x><list id=\"MAM\">\n so4_a1\n num_a1\n dst_a1\n</list></x>\n")
+    write(root, cam.AERO_MODEL, """
+        character(len=16) :: drydep_list(pcnst) = ' '
+        call addfld (trim(drydep_list(m))//'DDF', horiz_only,  'A',unit_basename//'/m2/s ', 'x')
+        """)
+    write(root, cam.AOA_TRACERS, """
+        character(len=4), parameter :: c_names(ncnst) = (/'AOA1', 'HORZ', 'VERT'/)
+        call addfld(cnst_name(mm), (/ 'lev' /), 'A', 'kg/kg', cnst_longname(mm))
+        """)
+    r = {x["name"]: x for x in cam.scrape(root)}
+    assert {n for n in r if n and n.endswith("DDF")} == {"num_a1DDF", "so4_a1DDF"}
+    assert {n for n in r if r[n]["source"].startswith(cam.AOA_TRACERS)} == {"AOA1", "HORZ", "VERT"}
+    assert r["AOA1"]["requires"] == {"aoa_tracers": [True]}
