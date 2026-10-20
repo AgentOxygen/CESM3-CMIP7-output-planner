@@ -89,6 +89,17 @@
   #total span { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .hint { color: var(--muted); padding: 24px 4px; }
+  /* legend descriptions on the left, volume pies to their right */
+  .legendwrap { display: flex; flex-wrap: wrap; gap: 8px 40px; align-items: flex-start; }
+  .charts { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+  .pie { display: flex; gap: 12px; align-items: center; }
+  .pie h3 { font-size: 12px; font-weight: 600; margin: 0 0 4px; }
+  .pie svg { flex: none; }
+  .pie ul { list-style: none; margin: 0; padding: 0; font-size: 12px; color: #333; }
+  .pie li { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .pie .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .pie .v { color: var(--muted); margin-left: auto; padding-left: 10px; font-variant-numeric: tabular-nums; }
+  .pie .none { font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -198,6 +209,7 @@
     </ul>
   </div>
 
+  <div class="legendwrap">
   <div class="legend">
     <span><span class="sym s-verified">&#10003;</span> in spreadsheet and registered by a CESM3 run</span>
     <span><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
@@ -206,6 +218,8 @@
     <span><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request</span>
     <span><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
     <span>Click a row to disable or re-enable it (excluded from the namelists and the total); &ldquo;show info&rdquo; audits it.</span>
+  </div>
+  <div class="charts" id="charts"></div>
   </div>
 </header>
 
@@ -290,6 +304,38 @@ function price(c, name, freq) {
   return { gb: b * per / 1e9, bytes: b, per, s };
 }
 
+// --- volume pies ------------------------------------------------------------
+
+// Fixed colour per entity (never by rank): categorical slots 1-8 of the reference palette.
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+const FREQ_ORDER = ["dec", "yr", "mon", "day", "6hr", "3hr", "1hr"];   // slowest to fastest, = B.per_year
+
+function pie(title, parts) {
+  const total = parts.reduce((t, x) => t + x.gb, 0);
+  if (!total) return `<div class="pie"><div><h3>${esc(title)}</h3><div class="none">no priced lines</div></div></div>`;
+  const R = 54, C = 60;
+  let a = -Math.PI / 2, shapes = "";
+  for (const x of parts) {
+    const share = x.gb / total, b = a + share * 2 * Math.PI;
+    const tip = `<title>${esc(x.label)}: ${esc(fmtGB(x.gb))} GB/yr (${(share * 100).toFixed(1)}%)</title>`;
+    const st = `fill="${x.color}" stroke="#fff" stroke-width="2"`;
+    shapes += share > 0.9999 ? `<circle cx="${C}" cy="${C}" r="${R}" ${st}>${tip}</circle>`
+      : `<path d="M${C} ${C}L${C + R * Math.cos(a)} ${C + R * Math.sin(a)}A${R} ${R} 0 ${share > 0.5 ? 1 : 0} 1 ${C + R * Math.cos(b)} ${C + R * Math.sin(b)}Z" ${st}>${tip}</path>`;
+    a = b;
+  }
+  const rows = parts.map(x => `<li><span class="sw" style="background:${x.color}"></span>${esc(x.label)}` +
+    `<span class="v">${esc(fmtGB(x.gb))} GB/yr &middot; ${(x.gb / total * 100).toFixed(1)}%</span></li>`).join("");
+  return `<div class="pie"><svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="${esc(title)}">${shapes}</svg>` +
+    `<div><h3>${esc(title)}</h3><ul>${rows}</ul></div></div>`;
+}
+
+// by: {component: gb} and {freq: gb} over the priced, enabled lines.
+function drawPies(byComp, byFreq) {
+  const pick = (order, m) => order.filter(k => m[k] > 0).map(k => ({ label: k, gb: m[k], color: SERIES[order.indexOf(k)] }));
+  $("charts").innerHTML = pie("Volume by component", pick(B.components, byComp)) +
+    pie("Volume by frequency", pick(FREQ_ORDER, byFreq));
+}
+
 // --- selection --------------------------------------------------------------
 
 function selected() {
@@ -337,19 +383,20 @@ const INFO_TD = '<td class="ib"><button data-info>show info</button></td></tr>';
 
 function render() {
   filterNote();
-  if (!state.exp) { $("zip").disabled = true; $("tot").textContent = "\u2013"; $("totnote").textContent = ""; $("main").innerHTML = '<div class="hint">Choose an experiment to list the CESM3 variables its CMIP7 request needs.</div>'; return; }
+  if (!state.exp) { $("charts").innerHTML = ""; $("zip").disabled = true; $("tot").textContent = "\u2013"; $("totnote").textContent = ""; $("main").innerHTML = '<div class="hint">Choose an experiment to list the CESM3 variables its CMIP7 request needs.</div>'; return; }
   current = compute();
   $("zip").disabled = !Object.keys(Namelist.COMPONENTS).some(c => active(c).length);
   for (const k of Object.keys(current.counts)) { const e = $("n-" + k); if (e) e.textContent = `(${current.counts[k]})`; }
   let total = 0, unpriced = 0, lines = 0;
-  const sub = {};
+  const sub = {}, byFreq = {};
   for (const c of B.components) for (const row of current.comps[c].values()) {
     const p = price(c, row.name, row.freq);
     row.p = p;
     if (state.off.has(offKey(c, row.key))) continue;
     lines++;
-    if (p.gb === undefined) unpriced++; else { total += p.gb; sub[c] = (sub[c] || 0) + p.gb; }
+    if (p.gb === undefined) unpriced++; else { total += p.gb; sub[c] = (sub[c] || 0) + p.gb; byFreq[row.freq] = (byFreq[row.freq] || 0) + p.gb; }
   }
+  drawPies(sub, byFreq);
   $("tot").textContent = fmtGB(total);
   $("totnote").textContent = `${lines - unpriced} of ${lines} lines priced`;
   const parts = [`<div id="summary"><span>${current.nreq} CMIP7 requests for <b>${esc(state.exp)}</b>.${state.off.size ? ` ${state.off.size} line(s) disabled <a data-reset>re-enable all</a>` : ""}</span><span class="dl">Downloads</span></div>`];
