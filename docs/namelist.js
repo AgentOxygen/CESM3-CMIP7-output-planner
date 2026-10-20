@@ -7,9 +7,9 @@
   // CMIP7 frequency -> [nhtfrq, mfilt]. Negative nhtfrq = hours; 0 = monthly.
   // -8760 / -87600 assume the 365-day calendar. mfilt is file packaging only.
   // fx and subhr have no entry, so they are dropped and listed.
-  const FREQ = { mon: [0, 1], dec: [-87600, 1], yr: [-8760, 1], day: [-24, 30],
+  const FREQ = { mon: [0, 1], dec: [-87600, 1], yr: [-8760, 1], "5day": [-120, 73], day: [-24, 30],
                  "6hr": [-6, 120], "3hr": [-3, 240], "1hr": [-1, 720] };
-  const ORDER = ["mon", "dec", "yr", "day", "6hr", "3hr", "1hr"];   // tape order: monthly first, then coarse -> fine
+  const ORDER = ["mon", "dec", "yr", "5day", "day", "6hr", "3hr", "1hr"];   // tape order: monthly first, then coarse -> fine
 
   const COMPONENTS = {
     atm: { file: "user_nl_cam", pre: "", flags: "ABILMNSX", maxName: 32, maxTapes: 10,

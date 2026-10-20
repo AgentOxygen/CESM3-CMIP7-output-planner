@@ -239,7 +239,9 @@ def test_committed_bundle_is_not_stale():
     """Catches "the evidence the statuses rest on changed (logs, aliases, source
     catalogue), forgot to regenerate" -- the same failure mode
     test_bundle_is_not_stale guards against for docs/data.json."""
-    current = import_cmip7.render(*import_cmip7.build_requests(), import_cmip7.source_configuration())
+    requests, experiments = import_cmip7.build_requests()
+    additional = import_cmip7.build_additional(requests, import_cmip7.load_source_index())
+    current = import_cmip7.render(requests, experiments, import_cmip7.source_configuration(), additional)
     assert current == import_cmip7.OUTPUT.read_text(), (
         "data/cmip7_request.yaml is out of date -- run `make import-cmip7` "
         "and commit the result.")
@@ -329,3 +331,38 @@ def test_token_carries_the_source_dims_even_when_the_log_decides_the_status(tmp_
     idx = source_setup(tmp_path, monkeypatch)
     m = import_cmip7.resolve_mapping("IN_BOTH", "atmos", {"atm": {"IN_BOTH"}}, idx, log_verifies={"atm"})
     assert m["status"] == "verified" and (m["dims"], m["horizontal"]) == (["lev"], "physgrid")
+
+
+# --- additional variables (data/additional_variables.yaml) --------------------
+
+def write_additional(tmp_path, entries, component="atm"):
+    path = tmp_path / "additional_variables.yaml"
+    path.write_text(yaml.safe_dump({"component": component, "additional": entries}))
+    return path
+
+
+def test_additional_source_unconfirmed_component_and_requested(tmp_path, monkeypatch):
+    idx = source_setup(tmp_path, monkeypatch)
+    path = write_additional(tmp_path, [
+        {"name": "LITERAL_SRC", "freq": "mon", "method": "A", "group": "simone-tapes", "tape": "h0"},
+        {"name": "LITERAL_SRC", "freq": "5day", "method": "I", "group": "simone-tapes", "tape": "h9"},
+        {"name": "siage", "freq": "mon", "method": "A", "group": "chemistry-only", "assumed": True},
+        {"name": "NOWHERE", "freq": "mon", "method": "A", "group": "chemistry-only", "assumed": True}])
+    requests = [{"frequency": "mon", "tokens": [{"component": "atm", "name": "LITERAL_SRC", "method": "A"}]}]
+    a = {(x["name"], x["freq"]): x for x in import_cmip7.build_additional(requests, idx, {}, path)}
+    lit = a[("LITERAL_SRC", "mon")]
+    assert (lit["status"], lit["component"], lit["source_certainty"], lit["source_ref"]) == ("source", "atm", "literal", "src/x.F90:1")
+    assert lit["requested"] and lit["tape"] == "h0" and lit["assumed"] is False
+    assert not a[("LITERAL_SRC", "5day")]["requested"]                   # other method and frequency
+    assert (a[("siage", "mon")]["component"], a[("siage", "mon")]["status"]) == ("ice", "source")   # only ice registers it
+    nowhere = a[("NOWHERE", "mon")]
+    assert (nowhere["status"], nowhere["component"], nowhere["source_ref"], nowhere["assumed"]) == ("unconfirmed", "atm", None, True)
+    assert "verified" not in {x["status"] for x in a.values()}
+
+
+def test_additional_skips_when_absent_and_rejects_unquoted_names(tmp_path):
+    assert import_cmip7.build_additional([], None, {}, tmp_path / "absent.yaml") == []
+    path = tmp_path / "bad.yaml"
+    path.write_text("component: atm\nadditional:\n  - {name: NO, freq: mon, method: A, group: chemistry-only}\n")
+    with pytest.raises(import_cmip7.DataError, match="quote"):
+        import_cmip7.build_additional([], None, {}, path)

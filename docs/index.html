@@ -53,7 +53,7 @@
   .legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
   .sym { display: inline-block; min-width: 1.2em; text-align: center; font-weight: 700; }
   .s-verified { color: var(--ok); } .s-source { color: var(--ok); opacity: .75; } .s-spreadsheet-only { color: var(--warn); }
-  .s-missing { color: var(--bad); }
+  .s-missing { color: var(--bad); } .s-unconfirmed { color: var(--warn); }
   .pill { font: 10px ui-monospace, Menlo, monospace; padding: 1px 6px; border-radius: 8px;
           border: 1px solid var(--line); color: var(--muted); margin-left: 3px; }
   .pill.realm-fallback { border-color: var(--warn); color: var(--warn); }
@@ -88,6 +88,7 @@
   #total button { margin-top: 4px; font-size: 12px; }
   #total span { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #additional label:has(input:disabled) { color: var(--muted); }
   .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); } .sub .ok { color: var(--ok); }
   .hint { color: var(--muted); padding: 24px 4px; }
   /* legend descriptions on the left, volume pies to their right */
@@ -144,12 +145,20 @@
         <span class="sym s-spreadsheet-only">&#9680;</span> spreadsheet only (not in log or source) <i id="n-spreadsheet-only"></i></label>
       <label><input type="checkbox" data-k="st" value="missing">
         <span class="sym s-missing">&#9888;</span> missing mapping <i id="n-missing"></i></label>
+      <label><input type="checkbox" data-k="st" value="unconfirmed">
+        additional, not in CESM3 source <i id="n-unconfirmed"></i></label>
     </div>
     <div class="row"><span class="lbl">component from</span>
       <label><input type="checkbox" data-k="cs" value="log" checked> CESM3 log <i id="n-cs-log"></i></label>
       <label><input type="checkbox" data-k="cs" value="source" checked> CESM3 source <i id="n-cs-source"></i></label>
       <label><input type="checkbox" data-k="cs" value="realm-fallback" checked>
         <span class="pill realm-fallback">realm</span> CMIP7 realm guess <i id="n-cs-realm-fallback"></i></label>
+    </div>
+    <div class="row"><span class="lbl">additional</span>
+      <label><input type="checkbox" id="addOnly" disabled> show additional variables only (<span class="sym s-extra">&#10010;</span>)</label>
+      <label title="Additional variables that the CMIP7 request also asks for and the CESM3 source registers"><input type="checkbox" id="addBoth" disabled>
+        show additional variables that are also in the CMIP7 request <i id="n-both"></i></label>
+      <span class="note">MTt4s only</span>
     </div>
     </div>
   </div>
@@ -159,8 +168,10 @@
     <div class="row" id="freqs"><span class="lbl">frequency</span></div>
     <div class="row" id="additional"><span class="lbl"><span class="sym s-extra" title="additional variable, not in the CMIP7 request">&#10010;</span> additional (not CMIP7)</span>
       <label id="chemOpt" hidden><input type="checkbox" id="mt4sVars" checked> interactive chemistry</label>
-      <label><input type="checkbox" id="addLand" checked> land (not implemented)</label>
-      <label><input type="checkbox" id="addOcean" checked> ocean (not implemented)</label></div>
+      <label><input type="checkbox" id="addAtm" checked> atmosphere</label>
+      <label><input type="checkbox" id="addLand" checked disabled> land (not implemented)</label>
+      <label><input type="checkbox" id="addOcean" checked disabled> ocean (not implemented)</label>
+</div>
   </div>
 
   <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).</div>
@@ -216,7 +227,7 @@
     <span><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
     <span><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
     <span><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
-    <span><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request</span>
+    <span><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request (MTt4s only)</span>
     <span><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
     <span>Click a row to disable or re-enable it (excluded from the namelists and the total); &ldquo;show info&rdquo; audits it.</span>
   </div>
@@ -232,10 +243,10 @@
 <script src="namelist.js"></script>
 <script>
 let B;
-const state = { off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
-const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;" };
+const state = { mt4s: false, addChem: true, addAtm: true, addOnly: false, addBoth: false, off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
+const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;", "unconfirmed": "&#9676;" };
 const LABEL = { "verified": "verified", "source": "in CESM3 source", "spreadsheet-only": "spreadsheet only",
-                "missing": "missing mapping" };
+                "missing": "missing mapping", "unconfirmed": "not in CESM3 source" };
 // CESM history averaging flags (the `:X` in a CAM/CTSM fincl entry).
 const METHOD = { A: "mean", I: "instantaneous", X: "maximum", M: "minimum", SUM: "sum" };
 const colon = (c) => B.colon_components.includes(c);
@@ -247,10 +258,13 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const sym = (st) => `<span class="sym s-${st}" title="${LABEL[st]}">${GLYPH[st]}</span>`;
+const sym = (st) => st === "unconfirmed" ? "" : `<span class="sym s-${st}" title="${LABEL[st]}">${GLYPH[st]}</span>`;
 const srcPill = (cs) => `<span class="pill ${cs}" title="component derived from: ${cs}">${cs === "realm-fallback" ? "realm" : cs}</span>`;
+const extraRow = (row) => row.items.every(x => x.extra);
 
 function explain(t, r) {
+  if (r.extra) return `${r.why}.<br>${t.st === "source" ? `registered by the CESM3 source for ${esc(B.source_configuration)} at <code>${esc(t.ref || "")}</code>`
+    : `NOT registered by the CESM3 source for ${esc(B.source_configuration)}: it may not exist in the run`}; component <b>${t.c}</b>.`;
   const where = `<code>CESM3_current.csv</code> line ${r.l}`;
   const logs = t.log.length ? t.log.join(", ") : "";
   const status = {
@@ -287,7 +301,8 @@ $("filtersBtn").addEventListener("click", () => showFilters($("filters").hidden)
 function filterNote() {
   const on = [...document.querySelectorAll("#filters input[data-k=st]")].filter(c => c.checked)
     .map(c => ({ verified: "verified", source: "in source", "spreadsheet-only": "spreadsheet only", missing: "missing" })[c.value]);
-  $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}`;
+  const extra = [state.mt4s && state.addOnly && "additional only", state.mt4s && state.addBoth && "additional also in CMIP7"].filter(Boolean);
+  $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}${extra.length ? "; " + extra.join(" + ") : ""}`;
 }
 $("star").addEventListener("click", () => { showInfo(true); $("info").scrollIntoView({ behavior: "smooth", block: "center" }); });
 
@@ -309,7 +324,7 @@ function price(c, name, freq) {
 
 // Fixed colour per entity (never by rank): categorical slots 1-8 of the reference palette.
 const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
-const FREQ_ORDER = ["dec", "yr", "mon", "day", "6hr", "3hr", "1hr"];   // slowest to fastest, = B.per_year
+const FREQ_ORDER = ["dec", "yr", "mon", "day", "6hr", "3hr", "1hr", "5day"];   // = B.per_year (5day, an additional-only tape, last so the other colours stay put)
 
 function pie(title, parts) {
   const total = parts.reduce((t, x) => t + x.gb, 0);
@@ -351,7 +366,7 @@ function compute() {
   const comps = {}, missing = {};
   for (const c of B.components) { comps[c] = new Map(); missing[c] = []; }
   const counts = { "verified": 0, "source": 0, "spreadsheet-only": 0, "missing": 0,
-                   "cs-log": 0, "cs-source": 0, "cs-realm-fallback": 0 };
+                   "cs-log": 0, "cs-source": 0, "cs-realm-fallback": 0, "unconfirmed": 0, "both": 0 };
   const reqs = selected();
   for (const r of reqs) {
     if (state.noFreq.has(r.f) || state.noRealm.has(r.realm)) continue;
@@ -366,6 +381,34 @@ function compute() {
       const key = t.n + "|" + (t.m || "") + "|" + r.f, m = comps[t.c];
       if (!m.has(key)) m.set(key, { key, name: t.n, method: t.m, freq: r.f, items: [] });
       m.get(key).items.push({ r, t });
+    }
+  }
+  if (state.mt4s) {
+    for (const a of B.additional || []) {
+      if (!(a.g === "chemistry-only" ? state.addChem : state.addAtm)) continue;
+      if (state.noFreq.has(a.f)) continue;
+      if (a.rq) {      // already a CMIP7 row: mark it, don't add it twice
+        const row = comps[a.c].get(a.n + "|" + a.m + "|" + a.f);
+        if (row && row.items.some(x => ["verified", "source"].includes(x.t.st))) { row.simone = true; counts.both++; }
+        continue;
+      }
+      counts.unconfirmed += a.st === "unconfirmed";
+      if (!state.st.has(a.st)) continue;
+      const key = a.n + "|" + a.m + "|" + a.f, m = comps[a.c];
+      const why = a.g === "chemistry-only"
+        ? "Simone&rsquo;s chemistry-only request (only exists with interactive chemistry); the frequency is assumed (monthly mean), the namelist gives none"
+        : `Simone&rsquo;s request, tape ${esc(a.tp)}; not in the CMIP7 request`;
+      const r = { n: "additional: " + (a.g === "chemistry-only" ? "chemistry only" : "Simone tape " + a.tp), f: a.f, u: "", l: "", realm: "",
+                  raw: "", g: [], p: null, mn: null, tm: "", extra: true, why };
+      const t = { n: a.n, c: a.c, m: a.m, st: a.st, cs: "additional", sc: a.sc, ref: a.ref, log: [], mm: false, al: null };
+      if (!m.has(key)) m.set(key, { key, name: a.n, method: a.m, freq: a.f, items: [] });
+      m.get(key).items.push({ r, t, extra: true });
+    }
+    if (state.addOnly || state.addBoth) {
+      for (const c of B.components) {
+        for (const [k, row] of comps[c]) if (!((state.addOnly && extraRow(row)) || (state.addBoth && row.simone))) comps[c].delete(k);
+        missing[c] = [];
+      }
     }
   }
   return { comps, missing, counts, nreq: reqs.length };
@@ -426,7 +469,7 @@ function render() {
       const mm = row.items.some(x => x.t.mm);
       const names = [...new Set(row.items.map(x => x.r.n))];
       parts.push(`<tr class="item${state.off.has(offKey(c, row.key)) ? " off" : ""}" data-c="${c}" data-k="${esc(row.key)}">` +
-        `<td>${sts.map(sym).join("")}${srcs.map(srcPill).join("")}${mm ? '<span class="pill mm">&ne;realm</span>' : ""}</td>` +
+        `<td>${extraRow(row) ? '<span class="sym s-extra" title="additional variable, not in the CMIP7 request">&#10010;</span>' : ""}${sts.map(sym).join("")}${srcs.map(srcPill).join("")}${mm ? '<span class="pill mm">&ne;realm</span>' : ""}</td>` +
         `<td class="nm">${esc(cesmName(c, row))}${row.method && !colon(c) ? ` <span class="pill" title="time method: ${esc(METHOD[row.method])}">${esc(METHOD[row.method])}</span>` : ""}</td><td class="fq">${esc(row.freq)}</td>` +
         `<td class="cm">${esc(names.slice(0, 2).join("  ·  "))}${names.length > 2 ? `  · +${names.length - 2} more` : ""}</td>` +
         (row.p.gb === undefined
@@ -458,7 +501,9 @@ function methodHtml(r, t) {
 }
 
 function detailHtml(items) {
-  return items.map(({ r, t }) => `<div class="src"><b class="mono">${esc(r.n)}</b> &middot; ${esc(r.f)} &middot; ` +
+  return items.map(({ r, t }) => r.extra ? `<div class="src"><b class="mono">${esc(t.n)}</b> &middot; ${esc(r.f)} &middot; ` +
+    `<span class="sym s-extra">&#10010;</span> additional (not CMIP7) &middot; ${sym(t.st)} ${LABEL[t.st]}<br>${explain(t, r)}</div>` :
+    `<div class="src"><b class="mono">${esc(r.n)}</b> &middot; ${esc(r.f)} &middot; ` +
     `${sym(t ? t.st : "missing")} ${t ? LABEL[t.st] : "missing mapping"}<br>` +
     (t ? explain(t, r) + "<br>" + methodHtml(r, t) : `<code>CESM3_current.csv</code> line ${r.l} has no CESM variable name. Filed under <b>${r.fc}</b> by realm <code>${esc(r.realm)}</code> only.<br>`) +
     `raw <code>CESM Variable Name</code> cell: <code>${esc(r.raw) || "(empty)"}</code> &middot; UID <code>${esc(r.u)}</code><br>` +
@@ -559,7 +604,7 @@ function setup() {
   const label = { atmosChem: "atmosChem (chemistry)" };
   $("realms").insertAdjacentHTML("beforeend", realms.map(x =>
     `<label><input type="checkbox" data-k="realm" value="${esc(x)}" checked> ${esc(label[x] || x)}</label>`).join(""));
-  const freqs = [...new Set(B.requests.map(r => r.f))].sort();
+  const freqs = [...new Set([...B.requests.map(r => r.f), ...(B.additional || []).map(a => a.f)])].sort();
   $("freqs").insertAdjacentHTML("beforeend", freqs.map(f =>
     `<label><input type="checkbox" data-k="f" value="${esc(f)}" checked> ${esc(f)}</label>`).join(""));
   $("cfg").innerHTML = B.configs.map(c => `<option>${esc(c.label)}</option>`).join("");
@@ -569,8 +614,15 @@ function setup() {
   render();
 }
 
-document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", () =>
-  $("chemOpt").hidden = document.querySelector("input[name=chem]:checked").value !== "chem"));
+// The browser may restore the radio after a reload, so sync the checkbox on load as well as on change.
+// Additional variables exist for MTt4s only: elsewhere their checkboxes are off the page or disabled.
+function syncChem() {
+  state.mt4s = document.querySelector("input[name=chem]:checked").value === "chem";
+  $("chemOpt").hidden = !state.mt4s;
+  for (const id of ["addAtm", "addOnly", "addBoth"]) $(id).disabled = !state.mt4s;
+}
+document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", syncChem));
+syncChem();
 
 document.body.addEventListener("change", (e) => {
   const t = e.target;
@@ -580,6 +632,11 @@ document.body.addEventListener("change", (e) => {
   else if (t.dataset.k === "st" || t.dataset.k === "cs") state[t.dataset.k][t.checked ? "add" : "delete"](t.value);
   else if (t.dataset.k === "realm") state.noRealm[t.checked ? "delete" : "add"](t.value);
   else if (t.dataset.k === "f") state.noFreq[t.checked ? "delete" : "add"](t.value);
+  else if (t.id === "mt4sVars") state.addChem = t.checked;
+  else if (t.id === "addAtm") state.addAtm = t.checked;
+  else if (t.id === "addOnly") state.addOnly = t.checked;
+  else if (t.id === "addBoth") state.addBoth = t.checked;
+  else if (t.name === "chem") { /* handled by syncChem */ }
   else return;
   render();
 });
