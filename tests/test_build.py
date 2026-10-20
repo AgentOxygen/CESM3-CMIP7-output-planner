@@ -25,8 +25,9 @@ def test_bundle_is_valid_json_and_internally_consistent():
             assert t["st"] in b["statuses"]
             assert t["cs"] in b["component_sources"]
             assert t["c"] in b["components"]
-            # a log-derived mapping must name the logs that justify it; a source-derived one, where
-            assert (t["st"] != "verified") == (not t["log"])
+            # a log-derived mapping must name the logs that justify it; a source-derived one, where.
+            # A log of another configuration can place a name (cs log) without verifying it.
+            assert (t["cs"] == "log") == bool(t["log"]) and (t["st"] != "verified" or t["log"])
             assert (t["st"] != "source") or (t["sc"] and t["ref"])
 
 
@@ -41,7 +42,7 @@ def test_sizes_are_priced_lines_that_span_every_config():
     assert n == 3 and b["configs"][b["default_config"]]["key"] == build.DEFAULT_CONFIG
     assert b["sizes"]
     for key, s in b["sizes"].items():
-        assert len(s["b"]) == n and any(x is not None for x in s["b"]), key
+        assert len(s["b"]) == n and (any(x is not None for x in s["b"]) or s.get("x")), key   # x: why nowhere
     # every priced line's key is a real component|name from the request
     used = {f"{t['c']}|{t['n']}" for r in b["requests"] for t in r["t"] if t["c"]}
     assert set(b["sizes"]) <= used

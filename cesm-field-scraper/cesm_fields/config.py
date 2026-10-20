@@ -45,6 +45,7 @@ RULES = [
     (r"^source_(cism|glc)/", "cism", True),                       # absent under DGLC (data ice sheet) compsets
     (r"/fates/", "use_fates", True),
     (r"/MARBL(/|_scripts)|diagnostics_latest\.yaml", "marbl", True),
+    (r"/aoa_tracers\.F90$", "aoa_tracers", True),                   # bld/configure age_of_air_trcs
 ]
 
 

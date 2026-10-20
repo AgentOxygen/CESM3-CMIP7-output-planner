@@ -311,3 +311,26 @@ def test_cam_modal_tendency_species():
     assert sorted(m["_sfcoag1"]["a"]) == sorted(["bc_a1", "bc_a4", "dst_a1", "dst_a2", "ncl_a1", "ncl_a2", "num_a1",
                                                  "num_a2", "num_a4", "pom_a1", "pom_a4", "so4_a1", "so4_a2", "soa_a1", "soa_a2"])
     assert m["_sfnnuc1"]["a"] == ["H2SO4", "num_a2", "so4_a2"]
+
+
+def test_cam_aerosol_drydep_list_and_age_of_air_tracers(tmp_path):
+    """drydep_list: the package's species in the master aer drydep list (not the blank default);
+    aoa_tracers: the module's own c_names, registered only where `aoa_tracers` is on."""
+    root = tmp_path / cam.REPO_PATH
+    write(root, cam.CONSTITUENT_ARRAYS[0][0], "cnst_names(1) = (/'CLDLIQ'/)\n")
+    write(root, cam.CONSTITUENT_ARRAYS[1][0], "solsym(: 4) = (/ 'num_a1', 'so4_a1', 'SO2   ', 'O3    ' /)\n")
+    write(root, "src/physics/cam/constituents.F90", "sflxnam(m) = 'SF'//cnst_name(m)\n")
+    write(root, "bld/namelist_files/mozart_master_aer_drydep_list.xml",
+          "<x><list id=\"MAM\">\n so4_a1\n num_a1\n dst_a1\n</list></x>\n")
+    write(root, cam.AERO_MODEL, """
+        character(len=16) :: drydep_list(pcnst) = ' '
+        call addfld (trim(drydep_list(m))//'DDF', horiz_only,  'A',unit_basename//'/m2/s ', 'x')
+        """)
+    write(root, cam.AOA_TRACERS, """
+        character(len=4), parameter :: c_names(ncnst) = (/'AOA1', 'HORZ', 'VERT'/)
+        call addfld(cnst_name(mm), (/ 'lev' /), 'A', 'kg/kg', cnst_longname(mm))
+        """)
+    r = {x["name"]: x for x in cam.scrape(root)}
+    assert {n for n in r if n and n.endswith("DDF")} == {"num_a1DDF", "so4_a1DDF"}
+    assert {n for n in r if r[n]["source"].startswith(cam.AOA_TRACERS)} == {"AOA1", "HORZ", "VERT"}
+    assert r["AOA1"]["requires"] == {"aoa_tracers": [True]}

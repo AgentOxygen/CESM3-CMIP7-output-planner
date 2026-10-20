@@ -1,22 +1,25 @@
-"""reference/CESM3_current.csv (+ Variable Group-MASTER.csv, Priority
+"""reference/CESM3_current_v2.csv (+ Variable Group-MASTER.csv, Priority
 Level-MASTER.csv) -> data/cmip7_request.yaml
 
 Resolves the CMIP7 data request against CESM3: for each requested CMIP7
 variable, which native CESM history field(s) does it need, does a real run
 log or the CESM3 source register them, and at what priority. The rules,
-in short: `Formula`/`Scale` are never read (this prices CESM history output, not the
-CMIP-side computed value), and a comma-separated `CESM Variable Name` is a
-list of native fields CESM must write separately, not a formula to
-evaluate.
+in short: `Formula` and the regrid/native-dimension columns are never read (this prices
+CESM history output, not the CMIP-side computed value), and a comma-separated
+`CESM Variable Name (T4S)` is a list of native fields CESM must write separately (the
+formula's inputs), not a formula to evaluate. Columns are found by header prefix
+(`COLUMNS`), so a header annotation such as `(T4S)` doesn't break the join; a missing one
+is an error.
 
     python tools/import_cmip7.py
 
 Every token gets a mapping `status` and a `component_source`, so the web app
 can show how each mapping was derived:
 
-    status             verified          named in CESM3_current.csv AND registered
-                                         in a real CESM3 run log
-                       source            not in the log, but the CESM3 source registers
+    status             verified          named in the spreadsheet AND registered by the run
+                                         log in a component whose configuration in that
+                                         run matches SOURCE_CONFIG (LOG_VERIFIES)
+                       source            not verified, but the CESM3 source registers
                                          it for SOURCE_CONFIG (cesm-field-scraper); the
                                          token's `source_certainty` says how firmly
                                          (literal name / expanded from a loop / pattern)
@@ -24,6 +27,9 @@ can show how each mapping was derived:
                                          the source
                        (missing)         no CESM name in the row -> `tokens: []`
     component_source   log | source | realm-fallback (REALM_FALLBACK below)
+
+The log can place a field in a component without verifying it: an atm name in the
+MTso log gets `component_source: log` but its status from the T4S source (see LOG_VERIFIES).
 
 The input CSVs and reference/log_files/extracted_fields.yaml are local-only
 (see reference/.gitignore) and not committed. Missing any of them is not an
@@ -47,19 +53,36 @@ class DataError(Exception):
     """A problem in the input CSVs."""
 
 
-CESM3_CSV = ROOT / "reference" / "CESM3_current.csv"
+CESM3_CSV = ROOT / "reference" / "CESM3_current_v2.csv"
+# Spreadsheet columns the importer reads, by header prefix: v2 renamed `CESM Variable Name` to
+# `CESM Variable Name (T4S)`. An exact header wins, else the one header starting with the prefix.
+COLUMNS = {"cesm_name": "CESM Variable Name", "compound": "CMIP7 Compound Name",
+           "realm": "Modelling Realm - Primary", "frequency": "CMIP7 Frequency",
+           "groups": "CMIP7 Variable Groups", "experiments": "List of Experiments", "uid": "UID"}
 VARIABLE_GROUP_CSV = ROOT / "reference" / "cmip7-data-request" / "Variable Group-MASTER.csv"
 PRIORITY_LEVEL_CSV = ROOT / "reference" / "cmip7-data-request" / "Priority Level-MASTER.csv"
 LOG_FIELDS_YAML = ROOT / "reference" / "log_files" / "extracted_fields.yaml"
 OUTPUT = ROOT / "data" / "cmip7_request.yaml"
 ALIASES_YAML = ROOT / "data" / "aliases.yaml"
 
-# The CESM3 source catalogue (local-only output of cesm-field-scraper, like reference/) and the
-# configuration of it that decides which registrations count. Absent => no source evidence, and
-# statuses rest on the run log alone.
+# --- Which CESM3 build the statuses describe: change these together. ---
+# CATALOGUE is a cesm-field-scraper output directory (local-only, like reference/: `out` is
+# cesm3_0_alpha09e, `out-alpha11d` cesm3_0_alpha11d) and SOURCE_CONFIG a configuration in
+# its configurations.yaml whose `cesm_tag` is that catalogue's tag. To switch, point both at the
+# new pair, re-check LOG_VERIFIES, then `make import-cmip7 build`. Absent catalogue => no source
+# evidence, and statuses rest on the run log alone.
 SCRAPER = ROOT / "cesm-field-scraper"
-SOURCE_CONFIG = "BHISTE_MTt4s"
+CATALOGUE = SCRAPER / "out-alpha11d"
+SOURCE_CONFIG = "BHISTE_MTt4s_alpha11d"
 SOURCE_COMPONENTS = ["atm", "lnd", "ice", "ocn", "glc", "rof"]
+
+# The run log (reference/log_files) is b.e30_alpha09e_m.B1850C_MTso_Gris_Marbl: an MTso run
+# (ghg_mam4 chemistry, evolving Greenland ice sheet), and there is no T4S run. A log name verifies a
+# token only in a component configured the same in that run as in SOURCE_CONFIG: CTSM, CICE, MOM6
+# (MARBL on in both) and MOSART. Not atm (the chemistry decides which CAM fields exist) and not glc
+# (CISM runs in the log; SOURCE_CONFIG's DGLC%NOEVOLVE has no CISM). Elsewhere the log still says
+# which component a name lives in, but the status comes from the source.
+LOG_VERIFIES = {"lnd", "ice", "ocn", "rof"}
 
 # CMIP7's 8 "Modelling Realm - Primary" values -> the component(s) that could
 # register a matching native field, in preference order. A realm-restricted
@@ -141,19 +164,29 @@ _BRACKET_TAG = re.compile(r"\[[^\]]*\]")
 _AVGFLAG_SUFFIX = re.compile(r":[A-Za-z]$")
 
 
+# Names the spreadsheet lists among a row's inputs that are constants of its formula, not history
+# fields (`CH4_CHML/AVO*1e6`: Avogadro's number). Never tokens.
+NOT_FIELDS = {"AVO"}
+_OTHER_CHEMISTRY = re.compile(r";\s*\w+\s*:.*$", re.S)        # `...; T1S: MEG_ISOP, ...`
+_PREFIXED = re.compile(r"^\{([^}]*)\}(.*)$", re.S)               # `{B,MM}TAUN(+/-)TAUS`
+
+
 def split_tokens(raw):
-    """`CESM Variable Name` -> [(native field, explicit avgflag or None)]."""
+    """`CESM Variable Name (T4S)` -> [(native field, explicit avgflag or None)], each field once."""
     if not raw or not raw.strip() or raw.strip().upper() == "N/A":
         return []
-    cleaned = _BRACKET_TAG.sub("", raw)
-    out = []
+    cleaned = _OTHER_CHEMISTRY.sub("", _BRACKET_TAG.sub("", raw)).replace("(+/-)", "+")
+    prefixes = [""]
+    if m := _PREFIXED.match(cleaned.strip()):
+        prefixes, cleaned = [p.strip() for p in m.group(1).split(",")], m.group(2)
+    out = {}
     for part in re.split(r"[,+]", cleaned):
         part = part.strip()
         flag = _AVGFLAG_SUFFIX.search(part)
         name = _AVGFLAG_SUFFIX.sub("", part).strip()
-        if name:
-            out.append((name, flag.group()[1:].upper() if flag else None))
-    return out
+        for p in prefixes if name and name not in NOT_FIELDS else []:
+            out.setdefault(p + name, flag.group()[1:].upper() if flag else None)
+    return list(out.items())
 
 
 def normalize_tokens(raw):
@@ -164,9 +197,11 @@ def normalize_tokens(raw):
     sums them later, which is exactly the "target remapping" this tool does
     not price); a `NAME  [COSP]` annotation (not a formula, just a tag
     naming the satellite simulator the field comes from); a trailing
-    avgflag suffix (`O3:i`); and the one genuinely arithmetic row in the
-    whole request, `SFbc_a4 + bc_a4_CLXF`, handled the same way as a
-    comma-list.
+    avgflag suffix (`O3:i`); `+` between names (`SFbc_a4 + bc_a4_CLXF`),
+    handled the same way as a comma-list. v2 shapes: the sheet is for T4S
+    chemistry, so a `; T1S: ...` tail naming another chemistry's fields is
+    dropped; `{B,MM}TAUN(+/-)TAUS` is BTAUN, BTAUS, MMTAUN, MMTAUS; and a name
+    listed twice (`Vzm, ..., Vzm`) is one field.
     """
     return [name for name, _ in split_tokens(raw)]
 
@@ -194,10 +229,10 @@ def load_group_priorities():
     return groups
 
 
-def row_priority(row, group_priorities):
+def row_priority(row, group_priorities, column="CMIP7 Variable Groups"):
     """Best (lowest-value) priority across every CMIP7 Variable Group this
     row belongs to, or None if it belongs to none we recognise."""
-    groups = [g.strip() for g in row.get("CMIP7 Variable Groups", "").split(",")
+    groups = [g.strip() for g in row.get(column, "").split(",")
               if g.strip()]
     values = [group_priorities[g] for g in groups if g in group_priorities]
     return min(values) if values else None
@@ -211,18 +246,18 @@ def load_log_index():
             for component, entry in extracted.items()}
 
 
-def load_source_index(scraper=None, config_name=None):
+def load_source_index(catalogue=None, config_name=None):
     """{component: {"exact": {name: (certainty, ref, dims, horizontal)}, "patterns": [(glob, ref)]}} of the
-    registrations CESM3's source makes under one configuration, from cesm-field-scraper/out; None if absent.
+    registrations CESM3's source makes under one configuration, from CATALOGUE; None if absent.
 
     `certainty` is `literal` (a name in a registration call) or `expanded` (one of many a loop expands
     to, so the run decides). A literal record beats an expanded one for the same name, and one with a
     horizontal grid beats one without; `dims` are the non-horizontal dimension names (None if unresolved)."""
-    scraper = Path(scraper or SCRAPER)
-    configs, out = scraper / "configurations.yaml", scraper / "out"
+    out = Path(catalogue or CATALOGUE)
+    configs = out.parent / "configurations.yaml"
     if not (configs.exists() and out.exists()):
         return None
-    sys.path.insert(0, str(ROOT / "cesm-field-scraper"))       # its evaluator is the one source of truth for `requires`
+    sys.path.insert(0, str(SCRAPER))       # its evaluator is the one source of truth for `requires`
     from cesm_fields.config import active, load
     config = load(configs, config_name or SOURCE_CONFIG)
     loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -249,7 +284,7 @@ def load_source_index(scraper=None, config_name=None):
 
 def source_configuration():
     """Name of the source configuration the statuses were derived from, or None when no scraper output exists."""
-    return SOURCE_CONFIG if (SCRAPER / "out").exists() and (SCRAPER / "configurations.yaml").exists() else None
+    return SOURCE_CONFIG if CATALOGUE.exists() and (CATALOGUE.parent / "configurations.yaml").exists() else None
 
 
 def load_aliases(path=None):
@@ -285,7 +320,7 @@ def alias_candidates(name, aliases):
     return list(dict.fromkeys(out))
 
 
-def resolve_mapping(name, realm, log_index, src_index=None, aliases=None):
+def resolve_mapping(name, realm, log_index, src_index=None, aliases=None, log_verifies=None):
     """Everything known about where one native field comes from.
 
     Evidence, strongest first: the CESM3 run log (`verified`), the CESM3 source (`source`), nothing
@@ -296,7 +331,10 @@ def resolve_mapping(name, realm, log_index, src_index=None, aliases=None):
     `name` itself has no evidence, `alias_candidates` are tried and the first with evidence is used
     (`alias_of` records which). Source facts about the chosen component (`source_*`, `dims`,
     `horizontal`) are kept whatever the status, since pricing needs the dims of a logged field too.
+    A log component outside `log_verifies` (default LOG_VERIFIES) still picks the component but
+    not the status: that comes from the source, as if the name were not logged.
     """
+    log_verifies = LOG_VERIFIES if log_verifies is None else log_verifies
     preferred = REALM_COMPONENTS.get(realm, [])
 
     def evidence(n):
@@ -320,6 +358,8 @@ def resolve_mapping(name, realm, log_index, src_index=None, aliases=None):
         component = REALM_FALLBACK.get(realm)
         source, status = "realm-fallback", "spreadsheet-only"
     best = next((h for h in sorted(hits, key=lambda h: h[1] != "exact") if h[0] == component), None)
+    if status == "verified" and component not in log_verifies:
+        status = "source" if best else "spreadsheet-only"
     return {
         "name": name,
         "status": status,
@@ -340,6 +380,17 @@ def split_list(cell):
     return list(dict.fromkeys(p.strip() for p in cell.split(",") if p.strip()))
 
 
+def columns(fieldnames):
+    """{key: header} for COLUMNS: the exact header, else the one header starting with the prefix."""
+    out = {}
+    for key, prefix in COLUMNS.items():
+        found = [h for h in fieldnames if h == prefix] or [h for h in fieldnames if h.startswith(prefix)]
+        if len(found) != 1:
+            raise DataError(f"{CESM3_CSV.name}: expected one column starting {prefix!r}, found {found}")
+        out[key] = found[0]
+    return out
+
+
 def build_requests():
     """(requests, experiments): one record per CSV row, plus
     {experiment: [indices into requests]} for the experiment filter."""
@@ -350,16 +401,21 @@ def build_requests():
     experiments = {}
     with CESM3_CSV.open(newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
-        reader.fieldnames                          # read the header first
+        col = columns(reader.fieldnames)           # reads the header
         while True:
             start_line = reader.line_num + 1       # records can span lines
             row = next(reader, None)
             if row is None:
                 break
-            realm = row.get("Modelling Realm - Primary", "")
-            frequency = row.get("CMIP7 Frequency", "")
-            raw = row.get("CESM Variable Name", "")
-            prefix, flag, note = time_method(row["CMIP7 Compound Name"])
+            compound = row[col["compound"]].strip()
+            if not compound:                       # v2 blanked one; nothing to file it under
+                print(f"warning: {CESM3_CSV.name} line {start_line} (UID {row[col['uid']]}) has no "
+                      f"CMIP7 Compound Name; skipped", file=sys.stderr)
+                continue
+            realm = row.get(col["realm"], "")
+            frequency = row.get(col["frequency"], "")
+            raw = row.get(col["cesm_name"], "")
+            prefix, flag, note = time_method(compound)
             tokens = []
             for n, explicit in split_tokens(raw):
                 token = resolve_mapping(n, realm, log_index, src_index, aliases)
@@ -368,16 +424,16 @@ def build_requests():
                 token["method_source"] = ("cesm-name" if explicit
                                           else "compound-name" if flag else None)
                 tokens.append(token)
-            groups = split_list(row.get("CMIP7 Variable Groups", ""))
+            groups = split_list(row.get(col["groups"], ""))
             requests.append({
-                "name": row["CMIP7 Compound Name"],
-                "uid": row.get("UID", ""),
+                "name": compound,
+                "uid": row.get(col["uid"], ""),
                 "source_line": start_line,
                 "raw_cesm_name": raw,
                 "realm": realm,
                 "frequency": frequency,
                 "stream": FREQUENCY_STREAMS.get(frequency),
-                "priority": row_priority(row, group_priorities),
+                "priority": row_priority(row, group_priorities, col["groups"]),
                 "groups": groups,
                 # Where a row with no tokens at all would be filed.
                 "fallback_component": REALM_FALLBACK.get(realm),
@@ -385,7 +441,7 @@ def build_requests():
                 "method_note": note,
                 "tokens": tokens,
             })
-            for experiment in split_list(row.get("List of Experiments", "")):
+            for experiment in split_list(row.get(col["experiments"], "")):
                 experiments.setdefault(experiment, []).append(len(requests) - 1)
     return requests, dict(sorted(experiments.items()))
 
@@ -397,9 +453,9 @@ def render(requests, experiments, source_configuration=None):
 
 
 HEADER = """\
-# GENERATED by `tools/import_cmip7.py` from reference/CESM3_current.csv +
+# GENERATED by `tools/import_cmip7.py` from reference/CESM3_current_v2.csv +
 # reference/cmip7-data-request/{Variable Group,Priority Level}-MASTER.csv +
-# reference/log_files/extracted_fields.yaml + cesm-field-scraper/out (CESM3 source).
+# reference/log_files/extracted_fields.yaml + the cesm-field-scraper catalogue of `source_configuration`.
 # Do not hand-edit -- regenerate with `make import-cmip7` whenever the CMIP7
 # request CSVs change. The join rules are in that script's docstring.
 

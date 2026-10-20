@@ -29,6 +29,11 @@ import tools.import_cmip7 as import_cmip7
     ("O3:I", ["O3"]),
     ("SFbc_a4 + bc_a4_CLXF", ["SFbc_a4", "bc_a4_CLXF"]),
     ("A,,B", ["A", "B"]),            # a stray trailing comma, seen once in the real data
+    ("TAUX,TAUBLJX,TAUGWX ", ["TAUX", "TAUBLJX", "TAUGWX"]),          # v2: trailing space
+    ("Uzm, Vzm, VTHzm, Vzm", ["Uzm", "Vzm", "VTHzm"]),               # v2: a name listed twice is one field
+    ("MEG_ISOP, MEG_TERP; T1S: MEG_ISOP, MEG_MTERP", ["MEG_ISOP", "MEG_TERP"]),   # the T4S part only
+    ("{B,MM}TAUN(+/-)TAUS", ["BTAUN", "MMTAUN", "BTAUS", "MMTAUS"]),
+    ("CH4_CHML, TROP_P, AVO", ["CH4_CHML", "TROP_P"]),              # AVO is a formula constant (NOT_FIELDS)
 ])
 def test_normalize_tokens(raw, expected):
     assert import_cmip7.normalize_tokens(raw) == expected
@@ -88,9 +93,20 @@ LOG_INDEX = {"atm": {"TREFHT", "LOGGED_ONLY"}, "lnd": {"TREFHT", "TSA"}}
 
 
 def test_logged_name_is_verified_and_component_comes_from_log():
-    m = import_cmip7.resolve_mapping("LOGGED_ONLY", "atmos", LOG_INDEX)
+    m = import_cmip7.resolve_mapping("LOGGED_ONLY", "atmos", LOG_INDEX, log_verifies={"atm"})
     assert (m["status"], m["component"], m["component_source"]) == ("verified", "atm", "log")
     assert m["realm_mismatch"] is False
+
+
+def test_log_of_another_configuration_places_but_does_not_verify(tmp_path, monkeypatch):
+    """The run log is MTso: in atm it says where a name lives, the T4S source says whether it exists."""
+    idx = source_setup(tmp_path, monkeypatch)
+    log = {"atm": {"IN_BOTH", "LOGGED_ONLY"}, "lnd": {"TSA"}}
+    r = lambda n, realm="atmos": import_cmip7.resolve_mapping(n, realm, log, idx, log_verifies={"lnd"})
+    assert (r("IN_BOTH")["status"], r("IN_BOTH")["component_source"]) == ("source", "log")
+    assert (r("LOGGED_ONLY")["status"], r("LOGGED_ONLY")["component"]) == ("spreadsheet-only", "atm")
+    assert r("TSA", "land")["status"] == "verified"
+    assert import_cmip7.LOG_VERIFIES == {"lnd", "ice", "ocn", "rof"}
 
 
 def test_log_collision_prefers_the_realm_component_and_keeps_both():
@@ -116,7 +132,7 @@ def test_every_realm_has_a_fallback_component():
 
 # --- build_requests: end to end ---------------------------------------------
 
-CESM3_FIELDS = ["CMIP7 Compound Name", "CESM Variable Name",
+CESM3_FIELDS = ["CMIP7 Compound Name", "CESM Variable Name (T4S)",
                 "Modelling Realm - Primary", "CMIP7 Frequency",
                 "CMIP7 Variable Groups", "List of Experiments", "UID"]
 
@@ -139,14 +155,15 @@ def write_log_yaml(tmp_path, monkeypatch):
 
 def row(name, raw, realm="atmos", freq="mon", groups="grp_high",
         experiments="historical,piControl", uid="u", branding="tavg"):
-    return {"CMIP7 Compound Name": f"{realm}.{name}.{branding}-u-hxy-u.{freq}.glb", "CESM Variable Name": raw,
+    return {"CMIP7 Compound Name": f"{realm}.{name}.{branding}-u-hxy-u.{freq}.glb", "CESM Variable Name (T4S)": raw,
             "Modelling Realm - Primary": realm, "CMIP7 Frequency": freq,
             "CMIP7 Variable Groups": groups, "List of Experiments": experiments,
             "UID": uid}
 
 
 def test_build_requests_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.setattr(import_cmip7, "SCRAPER", tmp_path / "no-scraper")      # statuses from the log alone
+    monkeypatch.setattr(import_cmip7, "CATALOGUE", tmp_path / "no-scraper" / "out")      # statuses from the log alone
+    monkeypatch.setattr(import_cmip7, "LOG_VERIFIES", {"atm"})
     monkeypatch.setattr(import_cmip7, "ALIASES_YAML", tmp_path / "no-aliases.yaml")
     write_priority_csvs(tmp_path, monkeypatch)
     write_log_yaml(tmp_path, monkeypatch)
@@ -156,6 +173,7 @@ def test_build_requests_end_to_end(tmp_path, monkeypatch):
         row("sst", "SST", realm="ocean", groups="", experiments="historical"),
         row("none", "N/A", realm="land"),
         row("fixed", "TREFHT", freq="fx"),
+        {**row("blank", "TREFHT"), "CMIP7 Compound Name": "\n"},     # v2 blanked one compound name: skipped
     ]))
 
     requests, experiments = import_cmip7.build_requests()
@@ -186,6 +204,12 @@ def test_build_requests_end_to_end(tmp_path, monkeypatch):
     assert experiments["historical"] == [0, 2, 3, 4]
     assert experiments["piControl"] == [0, 3, 4]
     assert experiments["amip"] == [1]
+    assert len(requests) == 5
+
+
+def test_missing_column_is_an_error(tmp_path):
+    with pytest.raises(import_cmip7.DataError, match="CESM Variable Name"):
+        import_cmip7.columns(["CMIP7 Compound Name", "UID"])
 
 
 # --- main(): skip gracefully, never error, when inputs are absent ----------
@@ -260,7 +284,7 @@ def write_scraper(tmp_path):
 
 
 def source_setup(tmp_path, monkeypatch):
-    monkeypatch.setattr(import_cmip7, "SCRAPER", write_scraper(tmp_path))
+    monkeypatch.setattr(import_cmip7, "CATALOGUE", write_scraper(tmp_path) / "out")
     monkeypatch.setattr(import_cmip7, "SOURCE_CONFIG", "CFG")
     return import_cmip7.load_source_index()
 
@@ -273,14 +297,14 @@ def test_source_index_applies_configuration_and_prefers_literal(tmp_path, monkey
 
 
 def test_source_index_is_none_without_scraper_output(tmp_path, monkeypatch):
-    monkeypatch.setattr(import_cmip7, "SCRAPER", tmp_path / "nothing")
+    monkeypatch.setattr(import_cmip7, "CATALOGUE", tmp_path / "nothing" / "out")
     assert import_cmip7.load_source_index() is None and import_cmip7.source_configuration() is None
 
 
 def test_status_source_sits_between_verified_and_spreadsheet_only(tmp_path, monkeypatch):
     idx = source_setup(tmp_path, monkeypatch)
     log = {"atm": {"IN_BOTH"}}
-    r = lambda n: import_cmip7.resolve_mapping(n, "atmos", log, idx)
+    r = lambda n: import_cmip7.resolve_mapping(n, "atmos", log, idx, log_verifies={"atm"})
     assert r("IN_BOTH")["status"] == "verified" and r("IN_BOTH")["component_source"] == "log"
     lit, loop, pat = r("LITERAL_SRC"), r("LOOP_SRC"), r("AODDUST01")
     assert (lit["status"], lit["component_source"], lit["source_certainty"], lit["source_ref"]) == ("source", "source", "literal", "src/x.F90:1")
@@ -303,5 +327,5 @@ def test_daily_suffix_and_reviewed_aliases(tmp_path, monkeypatch):
 
 def test_token_carries_the_source_dims_even_when_the_log_decides_the_status(tmp_path, monkeypatch):
     idx = source_setup(tmp_path, monkeypatch)
-    m = import_cmip7.resolve_mapping("IN_BOTH", "atmos", {"atm": {"IN_BOTH"}}, idx)
+    m = import_cmip7.resolve_mapping("IN_BOTH", "atmos", {"atm": {"IN_BOTH"}}, idx, log_verifies={"atm"})
     assert m["status"] == "verified" and (m["dims"], m["horizontal"]) == (["lev"], "physgrid")

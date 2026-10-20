@@ -89,6 +89,13 @@ Some loops are resolved from the package's tables rather than expanded over ever
   (`inv_lst`, which also names `mo_setinv`'s `<inv>_dens`/`_vmr`). So `ghg_mam4` gets all five,
   `trop_strat_mam5_t4s2` (solves them) none. A `user_nl_cam` specifier can add others.
 
+- `modal_aero/aero_model.F90` (`<species>DDF/TBF/GVF/DTQ/DDV`): `drydep_list` is the `aer_drydep_list`
+  namelist, which build-namelist makes from the package's species found in
+  `bld/namelist_files/mozart_master_aer_drydep_list.xml` (the declaration's blank default is not a name).
+- `physics/cam/aoa_tracers.F90` (`AOA1`, `HORZ`, `VERT` and their `*SRC`): the module's own `c_names`,
+  under the `aoa_tracers` axis (bld/configure's `age_of_air_trcs`, on for `trop_strat_*`/`waccm_*`
+  chemistry, so on for BHISTE_MTt4s and off for BHISTC_MTso).
+
 The modal files reuse one `fieldname` for every call, so each call takes the `fieldname` assignment just before it.
 
 It also expands the per-constituent name arrays built in `constituents.F90`
@@ -100,9 +107,10 @@ records can over-claim; their `alternatives` count says by how much.
 ## Checked against a real alpha09e run
 
 The run log under `../reference/` is an MTso (`ghg_mam4`) run; there is no MTt4s log. The table below
-scored it against `BHISTE_MTt4s` before that was known. Against `BHISTC_MTso` on alpha11d output CAM
-recall is 56% exact, and every modal-aerosol tendency (`*_sfcsiz*`, `*_sfgaex1/2`, `*_sfcoag1`,
-`*_sfnnuc1`), `<inv>_dens/_vmr` and prescribed-oxidant name matches the log exactly (none missing, none extra).
+scored it against `BHISTE_MTt4s` before that was known. Against `BHISTC_MTso` on alpha11d output
+every modal-aerosol tendency (`*_sfcsiz*`, `*_sfgaex1/2`, `*_sfcoag1`,
+`*_sfnnuc1`), aerosol dry-deposition (`*DDF/TBF/GVF/DTQ/DDV`), `<inv>_dens/_vmr` and prescribed-oxidant
+name matches the log exactly (none missing, none extra); CAM recall is 59% exact.
 
 | | names in the log | exact | pattern only | not found |
 |---|---|---|---|---|

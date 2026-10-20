@@ -56,6 +56,7 @@ def known_names(root, chem=CHEM):
     known["inv_lst"] = invariants
     known["__tracer_cnst__"] = [n for n in tracer_cnst_names(root) if n in invariants]
     known["__modal__"] = modal_names(cnst)
+    known["__aer_drydep__"] = aer_drydep_list(root, cnst)
     # constituents.F90 builds public per-constituent name arrays used all over
     # CAM (`sflxnam(m) = 'SF'//cnst_name(m)`, ptendnam, tottnam, ...).
     env = fortran.assignments(fortran.statements(read(root / "src/physics/cam/constituents.F90")))
@@ -167,12 +168,33 @@ MODAL = {f"src/chemistry/{d}/modal_aero_{f}{v}.F90" for d, f in
          for v in ("", "_cam")}
 
 
-def _call_known(rel, call, stmts, k):
+def aer_drydep_list(root, cnst):
+    """modal aero_model's `drydep_list` (the `aer_drydep_list` namelist): build-namelist's
+    get_dep_list keeps the package's species that are in mozart_master_aer_drydep_list.xml
+    (all aerosol species here; the not-transported exception is gas-only)."""
+    path = root / "bld/namelist_files/mozart_master_aer_drydep_list.xml"
+    if not path.exists():                                    # synthetic test trees
+        return []
+    master = {n for body in re.findall(r"<list[^>]*>(.*?)</list>", read(path), re.S)
+              for n in re.split(r"[\s,]+", body) if n}
+    return sorted(c for c in cnst if c in master)
+
+
+AERO_MODEL = "src/chemistry/modal_aero/aero_model.F90"
+AOA_TRACERS = "src/physics/cam/aoa_tracers.F90"
+
+
+def _call_known(rel, call, stmts, k, env=None):
     """(env override, known override, patterns) for one call site in a file that needs one."""
     if rel == "src/chemistry/mozart/rate_diags.F90":
         return {}, {"grp%name": k["rxn_rate_sums"]}, None
     if rel == "src/chemistry/mozart/tracer_cnst.F90":
         return {}, {"fields%fldnam": k["__tracer_cnst__"]}, None
+    if rel == AERO_MODEL:                    # `drydep_list = ' '` is only the declaration's blank default
+        return {}, {"drydep_list": k["__aer_drydep__"]}, None
+    if rel == AOA_TRACERS and "c_names" in (env or {}):     # cnst_name(ifirst+m-1): this module's own tracers
+        names = fortran.literal_list(env["c_names"][0])
+        return {}, {"cnst_name": names if isinstance(names, list) else []}, None
     if rel not in MODAL or not (var := re.match(r"^\s*(?:trim\s*\()?\s*(\w+)", call.args[0])):
         return {}, {}, None
     var = var.group(1).lower()
@@ -216,7 +238,7 @@ def scrape(root, chems=(CHEM,)):
         for c, k in knowns.items():
             if own in knowns and c != own:
                 continue
-            env_over, known_over, patterns = _call_known(rel, call, stmts[rel], k)
+            env_over, known_over, patterns = _call_known(rel, call, stmts[rel], k, env)
             per_chem[c] = _records(routine, call, env={**env, **env_over},
                                    known={**k, **known_over, "__index__": indexes[rel]},
                                    registrar=routine, source=f"{rel}:{call.line}", patterns=patterns)

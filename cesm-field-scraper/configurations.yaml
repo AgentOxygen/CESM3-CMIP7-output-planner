@@ -24,6 +24,7 @@ BHISTE_MTt4s: &mtt4s
   use_fates: false                        # CLM60%BGC-CROP
   scam: false
   debug: false
+  aoa_tracers: true                       # bld/configure: age_of_air_trcs on for -chem trop_strat_*/waccm_* (AOA1, HORZ, VERT)
   marbl: true                             # a log shows MARBL running; compset has no MOM6%..MARBL, so confirm (plan, open question)
   # Not stated by the compset: waccmx, carma, cosp, ali_arms. Left off; the log-recall check (plan step 7) catches mistakes.
   optional_physics: []                    # nudging, silhs: namelist/configure options, off by default
@@ -63,6 +64,7 @@ BHISTC_MTso:
   compset: HIST_CAM70%MT_CLM60%BGC-CROP_CICE_MOM6_MOSART_DGLC%NOEVOLVE_WW3
   chem: ghg_mam4                          # bld/configure: cam7 default chem_pkg
   waccm_phys: false
+  aoa_tracers: false                      # ghg_mam4 is neither trop_strat_* nor waccm_*: no age-of-air tracers
   marbl: true                             # as BHISTE_MTt4s; MOM6 has no %MARBL-BIO in either compset, so confirm
   cam_config:
     <<: *mtt4s_cam
