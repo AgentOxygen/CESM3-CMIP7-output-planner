@@ -334,3 +334,33 @@ def test_cam_aerosol_drydep_list_and_age_of_air_tracers(tmp_path):
     assert {n for n in r if n and n.endswith("DDF")} == {"num_a1DDF", "so4_a1DDF"}
     assert {n for n in r if r[n]["source"].startswith(cam.AOA_TRACERS)} == {"AOA1", "HORZ", "VERT"}
     assert r["AOA1"]["requires"] == {"aoa_tracers": [True]}
+
+
+def test_cam_per_mode_numbered_names(tmp_path):
+    """aero_model.F90's `write(dgnum_name(n),fmt='(a,i1)') 'dgnum',n`: one name per mode of each package;
+    the strat-sulfate family only where modal_strat_sulfate is on (the package has OCS)."""
+    root = tmp_path / cam.REPO_PATH
+    write(root, cam.CONSTITUENT_ARRAYS[0][0], "cnst_names(1) = (/'CLDLIQ'/)\n")
+    write(root, "src/chemistry/pp_four/mo_sim_dat.F90", "solsym(: 4) = (/ 'num_a1', 'num_a2', 'num_a3', 'num_a4' /)\n")
+    write(root, "src/chemistry/pp_five/mo_sim_dat.F90",
+          "solsym(: 6) = (/ 'num_a1', 'num_a2', 'num_a3', 'num_a4', 'num_a5', 'OCS   ' /)\n")
+    write(root, "src/physics/cam/constituents.F90", "sflxnam(m) = 'SF'//cnst_name(m)\n")
+    write(root, cam.AERO_MODEL, """
+        dgnum_name(n) = ' '
+        write(dgnum_name(n),fmt='(a,i1)') 'dgnum',n
+        call addfld( dgnum_name(n),    (/ 'lev' /), 'I', 'm', 'Aerosol mode dry diameter' )
+        field_name = ' '
+        write(field_name,fmt='(a,i1)') 'wtpct_a',n
+        call addfld( field_name, (/ 'lev' /), 'I', '%', 'Aerosol mode weight percent H2SO4' )
+        call addfld( blank_name, (/ 'lev' /), 'I', '%', 'x' )
+        blank_name = ' '
+        """)
+    r = {}
+    for x in cam.scrape(root, ["four", "five"]):
+        r.setdefault(x["name"], x)
+    assert {n for n in r if n and n.startswith("dgnum")} == {f"dgnum{i}" for i in range(1, 6)}
+    assert "chem" not in r["dgnum4"]["requires"] and r["dgnum5"]["requires"]["chem"] == ["five"]
+    assert (r["dgnum1"]["dims"], r["dgnum1"]["avgflag"], r["dgnum1"]["units"]) == (["lev"], "I", "m")
+    assert {n for n in r if n and n.startswith("wtpct")} == {f"wtpct_a{i}" for i in range(1, 6)}
+    assert r["wtpct_a1"]["requires"]["chem"] == ["five"]                   # only the OCS package
+    assert "" not in r                                                     # a blank default is no name
