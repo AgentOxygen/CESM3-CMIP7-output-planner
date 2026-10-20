@@ -88,6 +88,7 @@
   #total button { margin-top: 4px; font-size: 12px; }
   #total span { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); } .sub .ok { color: var(--ok); }
   .hint { color: var(--muted); padding: 24px 4px; }
   /* legend descriptions on the left, volume pies to their right */
   .legendwrap { display: flex; flex-wrap: wrap; gap: 8px 40px; align-items: flex-start; }
@@ -379,6 +380,16 @@ const active = (c) => [...current.comps[c].values()].filter(r => !state.off.has(
 const openComps = new Set();   // component lists the user expanded; they start collapsed and keep their state across re-renders
 let current;   // last compute() result, for downloads and row expansion
 
+// One-phrase result of generating and validating a component's namelist (see Namelist.validate).
+function nlStatus(c, rows) {
+  if (!Namelist.COMPONENTS[c] || !rows.length) return "";
+  const o = Namelist.build(c, rows, nlMeta(rows));
+  if (o.error) return `, <b class="bad" title="${esc(o.error)}">namelist: not generated</b>`;
+  const { errors, warnings } = o.validation, tip = esc([...errors, ...warnings].join("\n"));
+  if (errors.length) return `, <b class="bad" title="${tip}">namelist: ${errors.length} error(s)</b>`;
+  return warnings.length ? `, <b class="warn" title="${tip}">namelist: ${warnings.length} warning(s)</b>` : `, <span class="ok" title="parsed back and checked">namelist valid</span>`;
+}
+
 const INFO_TD = '<td class="ib"><button data-info>show info</button></td></tr>';
 
 function render() {
@@ -405,7 +416,7 @@ function render() {
     const miss = current.missing[c];
     if (!all.length && !miss.length) continue;
     parts.push(`<details class="comp" data-c="${c}" ${openComps.has(c) ? "open" : ""}><summary><span>${c}</span>` +
-      `<span class="sub">${rows.length} variable/frequency lines` + (sub[c] ? `, ${esc(fmtGB(sub[c]))} GB/yr` : "") + (miss.length ? `, ${miss.length} requests with no mapping` : "") + `</span>` +
+      `<span class="sub">${rows.length} variable/frequency lines` + (sub[c] ? `, ${esc(fmtGB(sub[c]))} GB/yr` : "") + nlStatus(c, rows) + (miss.length ? `, ${miss.length} requests with no mapping` : "") + `</span>` +
       (Namelist.COMPONENTS[c] ? `<button data-dl="nl" data-c="${c}" ${rows.length ? "" : "disabled"} title="history namelist for ${c}">${Namelist.COMPONENTS[c].file}</button>` : "") +
       `<button data-dl="txt" data-c="${c}" ${rows.length ? "" : "disabled"} title="plain list of VARIABLE FREQUENCY lines">raw_text</button>` +
       `<button data-dl="csv" data-c="${c}" ${rows.length ? "" : "disabled"} title="audit trail: every line traced to its spreadsheet rows">csv</button></summary>` +

@@ -20,7 +20,7 @@ def test_cam_tapes_ordered_and_flagged():
     t = out["text"]
     assert " empty_htapes = .true." in t and " nhtfrq = 0, -24\n" in t and " mfilt = 1, 30\n" in t
     assert " fincl1 = 'PRECT:A'\n" in t
-    assert " fincl2 = 'T:A',\n    'TREFHTMX:X'\n" in t
+    assert " fincl2 = 'T:A','TREFHTMX:X'\n" in t
 
 
 def test_same_name_two_methods_split_tapes():
@@ -94,7 +94,7 @@ def test_cice_masks_streams_and_alias():
                    {"name": "nonsense", "freq": "mon"}])["text"]
     assert " histfreq = 'm', 'd', 'x', 'x', 'x'\n" in t and " histfreq_n = 1, 1, 0, 0, 0\n" in t
     assert " f_aice = 'md'\n" in t and " f_siage = 'd'\n" in t
-    assert "not exported: nonsense (mon)" in t
+    assert "no f_ switch of that name in CICE: 1" in t and "nonsense (mon)" in t
 
 
 def test_cice_shared_letter_drops_finer_stream():
@@ -108,7 +108,8 @@ def test_mom6_diag_table_modules_reductions_and_aliases():
             [("thetao", "mon", "A"), ("tos", "mon", "A"), ("tos", "mon", "X"), ("so", "day", "I"), ("mystery", "mon", "A")]]
     meta = {"momFields": {"ocean_model": ["tos"], "ocean_model_z": ["thetao", "so"]}}
     code = f"console.log(JSON.stringify(require({json.dumps(str(JS))}).build('ocn', {json.dumps(rows)}, {json.dumps(meta)})))"
-    t = json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)["text"]
+    import re
+    t = re.sub(r" +", " ", json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)["text"])
     assert '"ocean_model_z", "thetao", "thetao", "${CASE}.mom6.h.mon.z.%4yr-%2mo", "all", "mean", "none", 2' in t
     assert '"ocean_model", "tos", "tos_max", "${CASE}.mom6.h.mon.native.%4yr-%2mo", "all", "max", "none", 2' in t
     assert '"ocean_model_z", "so", "so_inst"' in t and '"ocean_model", "mystery", "mystery"' in t
@@ -121,3 +122,108 @@ def test_header_reports_source_only_and_unevidenced_lines():
     t = json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)["text"]
     assert "2 line(s) have no CESM3 source or run-log evidence" in t
     assert "5 line(s) are registered by the CESM3 source for CFG but were not seen in a run log" in t
+
+
+def test_cam_lists_wrap_under_the_line_limit():
+    rows = [{"name": f"FIELD_{i:03d}", "freq": "mon", "method": "A"} for i in range(200)]
+    out = build("atm", rows)
+    assert all(len(l) <= 100 for l in out["text"].split("\n")) and out["validation"]["errors"] == []
+    assert out["text"].count("'FIELD_") == 200
+
+
+def test_dropped_and_unevidenced_names_go_in_a_trailing_block():
+    rows = [{"name": "T", "freq": "mon", "method": "A"}, {"name": "AREA", "freq": "fx"},
+            {"name": "ODDBALL", "freq": "mon", "method": "A", "items": [{"t": {"st": "spreadsheet-only"}}]}]
+    t = build("atm", rows)["text"]
+    assert t.index(" fincl1 = ") < t.index("--- not exported: 1 line(s)") < t.index("--- no CESM3 source or run-log evidence (1)")
+    assert "frequency fx has no history setting: 1" in t
+
+
+def test_validate_catches_a_bad_namelist():
+    rows = [{"name": "T", "freq": "mon", "method": "A"}, {"name": "Q", "freq": "mon", "method": "A"}]
+    good = build("atm", rows)
+    assert good["validation"] == {"errors": [], "warnings": []}
+    bad = good["text"].replace("'Q:A'", "'T:A'").replace("nhtfrq = 0", "nhtfrq = 0, -24")
+    code = f"console.log(JSON.stringify(require({json.dumps(str(JS))}).validate('atm', {json.dumps(bad)}, {json.dumps(rows)}, [])))"
+    errs = json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)["errors"]
+    assert any("appears twice" in e for e in errs) and any("nhtfrq lists 2" in e for e in errs)
+    assert any("requested but missing" in e and "Q A mon" in e for e in errs)
+
+
+def test_validation_findings_are_written_into_the_file():
+    # a CICE field the page does not know is dropped, so the file stays valid; a name not in iceFields in the text is an error
+    out = build_ice([{"name": "aice", "freq": "mon"}])
+    assert out["validation"]["errors"] == [] and "VALIDATION" not in out["text"]
+
+
+# --- real combinations: the committed docs/data.json, selected the way the page does ----------------------------
+
+DATA = JS.parent / "data.json"
+
+REAL = r"""
+const B = require(%(data)s), N = require(%(js)s);
+const out = [];
+for (const [exp, only] of %(cases)s) {
+  const comps = {};
+  for (const c of B.components) comps[c] = new Map();
+  for (const i of B.experiments[exp]) {
+    const r = B.requests[i];
+    if (only && r.f !== only) continue;
+    for (const t of r.t) {
+      if (!["verified", "source"].includes(t.st)) continue;       // the page's default statuses
+      const k = t.n + "|" + (t.m || "") + "|" + r.f;
+      if (!comps[t.c].has(k)) comps[t.c].set(k, { name: t.n, method: t.m, freq: r.f, items: [] });
+      comps[t.c].get(k).items.push({ r, t });
+    }
+  }
+  for (const c of Object.keys(N.COMPONENTS)) {
+    const rows = [...comps[c].values()];
+    if (!rows.length) continue;
+    const meta = { iceFields: B.cice_fields, momFields: B.mom_fields, title: "experiment " + exp,
+      unverified: rows.filter(r => r.items.some(x => !["verified", "source"].includes(x.t.st))).length,
+      sourceOnly: rows.filter(r => r.items.some(x => x.t.st === "source")).length, sourceConfiguration: B.source_configuration };
+    const o = N.build(c, rows, meta);
+    out.push({ exp, only, comp: c, rows: rows.length, error: o.error || null, text: o.text || "", errors: o.validation ? o.validation.errors : [],
+               dropped: (o.dropped || []).length });
+  }
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def real(cases):
+    code = REAL % {"data": json.dumps(str(DATA)), "js": json.dumps(str(JS)), "cases": json.dumps(cases)}
+    return json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)
+
+
+FREQS = [None, "mon", "day", "6hr", "3hr", "1hr", "yr", "dec"]
+
+
+def test_real_experiments_validate_and_wrap_for_every_frequency():
+    cases = [[e, f] for e in ("piControl", "historical", "esm-hist", "scen7-m") for f in FREQS]
+    results = real(cases)
+    assert results
+    for r in results:
+        where = f"{r['exp']} / {r['only'] or 'all frequencies'} / {r['comp']}"
+        if r["error"]:
+            assert "history tapes" in r["error"], where           # only the tape budget may refuse a selection
+            continue
+        assert r["errors"] == [], where
+        for n, line in enumerate(r["text"].split("\n"), 1):
+            is_comment = line.startswith(("!", "#"))
+            if is_comment:
+                assert len(line) <= 100, f"{where}: comment line {n} is {len(line)} wide"
+            elif r["comp"] != "ocn":                              # the diag_table is not a Fortran namelist
+                assert len(line) <= 132, f"{where}: line {n} is {len(line)} wide"
+            if r["comp"] in ("atm", "lnd", "rof") and "fincl" in line or line.startswith("    '"):
+                assert len(line) <= 100, f"{where}: list line {n} is {len(line)} wide"
+
+
+def test_picontrol_three_hourly_atm_header_is_wrapped():
+    (r,) = [x for x in real([["piControl", "3hr"]]) if x["comp"] == "atm"]
+    lines = r["text"].split("\n")
+    assert r["errors"] == [] and max(len(l) for l in lines) <= 100
+    i = next(n for n, l in enumerate(lines) if "were not seen in a run" in l)
+    assert lines[i + 1].startswith("!   ") and "may not exist in every case" in lines[i + 1]
+    assert " nhtfrq = -3" in r["text"] and " mfilt = 240" in r["text"]
+    assert r["text"].count("fincl1 = ") == 1
