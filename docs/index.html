@@ -88,6 +88,7 @@
   #total button { margin-top: 4px; font-size: 12px; }
   #total span { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #additional label:has(input:disabled) { color: var(--muted); }
   .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); } .sub .ok { color: var(--ok); }
   .hint { color: var(--muted); padding: 24px 4px; }
   /* legend descriptions on the left, volume pies to their right */
@@ -159,8 +160,9 @@
     <div class="row" id="freqs"><span class="lbl">frequency</span></div>
     <div class="row" id="additional"><span class="lbl"><span class="sym s-extra" title="additional variable, not in the CMIP7 request">&#10010;</span> additional (not CMIP7)</span>
       <label id="chemOpt" hidden><input type="checkbox" id="mt4sVars" checked> interactive chemistry</label>
-      <label><input type="checkbox" id="addLand" checked> land (not implemented)</label>
-      <label><input type="checkbox" id="addOcean" checked> ocean (not implemented)</label></div>
+      <label><input type="checkbox" id="addAtm" checked disabled> atmosphere (not implemented)</label>
+      <label><input type="checkbox" id="addLand" checked disabled> land (not implemented)</label>
+      <label><input type="checkbox" id="addOcean" checked disabled> ocean (not implemented)</label></div>
   </div>
 
   <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).</div>
@@ -569,8 +571,10 @@ function setup() {
   render();
 }
 
-document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", () =>
-  $("chemOpt").hidden = document.querySelector("input[name=chem]:checked").value !== "chem"));
+// The browser may restore the radio after a reload, so sync the checkbox on load as well as on change.
+const syncChem = () => $("chemOpt").hidden = document.querySelector("input[name=chem]:checked").value !== "chem";
+document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", syncChem));
+syncChem();
 
 document.body.addEventListener("change", (e) => {
   const t = e.target;
