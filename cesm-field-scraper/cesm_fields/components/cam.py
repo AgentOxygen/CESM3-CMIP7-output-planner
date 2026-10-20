@@ -57,6 +57,9 @@ def known_names(root, chem=CHEM):
     known["__tracer_cnst__"] = [n for n in tracer_cnst_names(root) if n in invariants]
     known["__modal__"] = modal_names(cnst)
     known["__aer_drydep__"] = aer_drydep_list(root, cnst)
+    known["__nmodes__"] = sum(bool(re.fullmatch(r"num_a\d+", c)) for c in cnst)
+    # build-namelist: cam6/cam7 `_mam` chemistry sets modal_strat_sulfate when the mechanism has OCS
+    known["__strat_sulfate__"] = "OCS" in cnst
     # constituents.F90 builds public per-constituent name arrays used all over
     # CAM (`sflxnam(m) = 'SF'//cnst_name(m)`, ptendnam, tottnam, ...).
     env = fortran.assignments(fortran.statements(read(root / "src/physics/cam/constituents.F90")))
@@ -184,12 +187,34 @@ AERO_MODEL = "src/chemistry/modal_aero/aero_model.F90"
 AOA_TRACERS = "src/physics/cam/aoa_tracers.F90"
 
 
+# `write(dgnum_name(n),fmt='(a,i1)') 'dgnum',n` before `call addfld(dgnum_name(n), ...)`
+_NUMBERED = re.compile(r"""^write\s*\(\s*(\w+)\s*(?:\([^)]*\))?\s*,\s*(?:fmt\s*=\s*)?'\(a\d*,i(\d)(?:\.(\d))?\)'\s*\)\s*'(\w+)'\s*,\s*\w+\s*$""", re.I)
+STRAT_SULFATE = {"wtpct_a", "sulfeq_a", "sulden_a"}       # inside `if (modal_strat_sulfate)`
+
+
+def _mode_numbered(call, stmts, k):
+    """Names for an aero_model.F90 addfld whose name was written by a per-mode `write` (loop n = 1,
+    ntot_amode): prefix + mode number, one per mode of the package. None if the call isn't one."""
+    if not (m := re.match(r"^\s*(\w+)", call.args[0])):           # a literal name
+        return None
+    var = m.group(1).lower()
+    writes = [m for line, t in stmts if line < call.line and (m := _NUMBERED.match(t)) and m.group(1).lower() == var]
+    if not writes:
+        return None
+    _, width, pad, prefix = writes[-1].groups()
+    if prefix in STRAT_SULFATE and not k["__strat_sulfate__"]:
+        return []
+    return [prefix + str(n).zfill(int(pad or 0)).rjust(int(width)) for n in range(1, k["__nmodes__"] + 1)]
+
+
 def _call_known(rel, call, stmts, k, env=None):
     """(env override, known override, patterns) for one call site in a file that needs one."""
     if rel == "src/chemistry/mozart/rate_diags.F90":
         return {}, {"grp%name": k["rxn_rate_sums"]}, None
     if rel == "src/chemistry/mozart/tracer_cnst.F90":
         return {}, {"fields%fldnam": k["__tracer_cnst__"]}, None
+    if rel == AERO_MODEL and (numbered := _mode_numbered(call, stmts, k)) is not None:
+        return {}, {}, numbered
     if rel == AERO_MODEL:                    # `drydep_list = ' '` is only the declaration's blank default
         return {}, {"drydep_list": k["__aer_drydep__"]}, None
     if rel == AOA_TRACERS and "c_names" in (env or {}):     # cnst_name(ifirst+m-1): this module's own tracers
@@ -232,7 +257,7 @@ def scrape(root, chems=(CHEM,)):
         if rel not in indexes:
             text = read(root / rel)
             indexes[rel] = constituent_indexes(text)
-            stmts[rel] = list(fortran.statements(text)) if rel in MODAL else []
+            stmts[rel] = list(fortran.statements(text)) if rel in MODAL | {AERO_MODEL} else []
         own = config.requires(rel + ":0").get("chem", [None])[0]          # a pp_<chem>/ file: only its own package
         per_chem = {}
         for c, k in knowns.items():

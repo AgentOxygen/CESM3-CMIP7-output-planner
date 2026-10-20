@@ -44,6 +44,7 @@ def records(*, name, dims, horizontal, registrar, source, time=True,
     if isinstance(name, str):
         return [{"name": name, **body}]
     alts = patterns if patterns is not None else fortran.expand(name.text, env, known)
+    alts = [a if a.strip() else "*" for a in alts]        # a blank default (`name = ' '`) names nothing: unresolved
     if not alts:                  # a loop over a known-empty list (no rate sums in this mechanism): nothing registered
         return []
     out = [{"name": n, "name_expr": name.text, "alternatives": len(alts), **body} for n in alts if "*" not in n]

@@ -92,6 +92,12 @@ Some loops are resolved from the package's tables rather than expanded over ever
 - `modal_aero/aero_model.F90` (`<species>DDF/TBF/GVF/DTQ/DDV`): `drydep_list` is the `aer_drydep_list`
   namelist, which build-namelist makes from the package's species found in
   `bld/namelist_files/mozart_master_aer_drydep_list.xml` (the declaration's blank default is not a name).
+- `modal_aero/aero_model.F90` per-mode names written with `write(name,'(a,i1)') 'dgnum',n`: one per mode of
+  the package (`dgnum1..4`, `dgnumwet1..4` for ghg_mam4; `..5` for trop_strat_mam5_t4s2), and the
+  `wtpct_a`/`sulfeq_a`/`sulden_a` family only where build-namelist sets `modal_strat_sulfate` (a `_mam`
+  package with OCS: t4s2, not ghg_mam4). Other numbered families are not expanded: aerosol_optics_cam's
+  `BURDEN01`/`AODDUST01`/`BURDENdn01` count bins across the radiation diagnostic lists (namelist-dependent),
+  and the rest of the `write(...,'(a,i2.2)')` names (see "Checked against a real alpha09e run").
 - `physics/cam/aoa_tracers.F90` (`AOA1`, `HORZ`, `VERT` and their `*SRC`): the module's own `c_names`,
   under the `aoa_tracers` axis (bld/configure's `age_of_air_trcs`, on for `trop_strat_*`/`waccm_*`
   chemistry, so on for BHISTE_MTt4s and off for BHISTC_MTso).
