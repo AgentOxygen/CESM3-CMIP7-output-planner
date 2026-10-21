@@ -38,6 +38,12 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   const ch = mk("charts"), btn = mk("chartsBtn"); ch.hidden = true;   // as in the markup
   btn.on.click(); out.chartsOpen = { hidden: ch.hidden, aria: btn.attrs["aria-expanded"], text: btn.innerHTML };
   btn.on.click(); out.chartsShut = { hidden: ch.hidden, aria: btn.attrs["aria-expanded"], text: btn.innerHTML };
+  const live = () => ({ tot: mk("tot").textContent, zipDisabled: mk("zip").disabled, charts: mk("charts").innerHTML,
+    checked: (main.innerHTML.match(/data-comp="(\w+)" checked/g) || []).length, boxes: (main.innerHTML.match(/data-comp=/g) || []).length });
+  out.compAll = live();
+  st.offComp.add("atm"); A.render(); out.compNoAtm = live(); out.compNoAtmHtml = /data-comp="atm"\s+title/.test(main.innerHTML);
+  for (const c of A.B().components) st.offComp.add(c); A.render(); out.compNone = live();
+  st.offComp.clear(); A.render(); out.compBack = live();
   const o = ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {} });
   out.nl = o.error ? { error: o.error } : { freqs: [...new Set(o.tapes.map(t => t.freq))], errors: o.validation.errors };
   console.log(JSON.stringify(out));
