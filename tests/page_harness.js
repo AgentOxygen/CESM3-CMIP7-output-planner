@@ -55,5 +55,14 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   rfb.on.click(); out.rfShut = { hidden: rf.hidden, aria: rfb.attrs["aria-expanded"], text: rfb.innerHTML };
   out.rfNoteAll = mk("rfNote").textContent;
   st.noRealm.add("atmos"); st.noFreq.add("mon"); st.noFreq.add("day"); A.render(); out.rfNoteOff = mk("rfNote").textContent;
+  const nb = mk("nlBtn"), no = mk("nlOpts"); no.hidden = true;   // as in the markup
+  nb.on.click(); out.nlOpen = { hidden: no.hidden, aria: nb.attrs["aria-expanded"], text: nb.textContent };
+  nb.on.click(); out.nlShut = { hidden: no.hidden, aria: nb.attrs["aria-expanded"], text: nb.textContent };
+  out.emptyBoxes = [...mk("emptyRow").innerHTML.matchAll(/data-empty="(\w+)" checked/g)].map(m => m[1]);
+  out.nlNoteAll = mk("nlNote").textContent;
+  const atmText = () => ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {}, emptyOff: [...st.noEmpty] }).text;
+  out.emptyOn = atmText().includes(" empty_htapes = .true.");
+  st.noEmpty.add("atm"); A.render(); out.nlNoteOff = mk("nlNote").textContent; out.emptyOff = atmText().includes(" empty_htapes = .true.");
+  st.noEmpty.delete("atm");
   console.log(JSON.stringify(out));
 })();

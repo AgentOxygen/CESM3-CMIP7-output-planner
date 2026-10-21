@@ -74,3 +74,12 @@ def test_realms_and_frequencies_button_toggles_and_summarises():
     assert o["rfOpen"]["hidden"] is False and o["rfOpen"]["aria"] == "true" and "Hide" in o["rfOpen"]["text"]
     assert o["rfShut"]["hidden"] is True and o["rfShut"]["aria"] == "false" and "Show" in o["rfShut"]["text"]
     assert o["rfNoteAll"] == "all shown" and o["rfNoteOff"] == "1 realm(s) and 2 frequencies turned off"
+
+
+def test_namelist_options_button_and_empty_htapes_checkboxes():
+    o = run()
+    assert o["nlOpen"]["hidden"] is False and o["nlOpen"]["aria"] == "true" and "Hide" in o["nlOpen"]["text"]
+    assert o["nlShut"]["hidden"] is True and o["nlShut"]["aria"] == "false" and "Show" in o["nlShut"]["text"]
+    assert o["emptyBoxes"] == ["atm", "lnd"]                      # only the components whose namelist has such a switch
+    assert o["emptyOn"] is True and o["nlNoteAll"] == ""          # default: on, as before
+    assert o["emptyOff"] is False and o["nlNoteOff"] == "default output kept for atm"

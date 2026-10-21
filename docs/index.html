@@ -47,10 +47,11 @@
   #chem { display: flex; gap: 14px; }
   #filters[hidden] { display: none; }
   #rf[hidden] { display: none; }
+  #nlOpts[hidden] { display: none; }
   #chemOpt[hidden] { display: none; }
   #charts[hidden] { display: none; }   /* .charts sets display:flex, which would otherwise beat the hidden attribute */
   .s-extra { color: var(--accent); }
-  #filtersBtn, #rfBtn { font-size: 12px; margin-left: 6px; }
+  #filtersBtn, #rfBtn, #nlBtn { font-size: 12px; margin-left: 6px; }
   #legendBtn { font-size: 12px; }
   #filterNote { margin-left: 8px; }
   .legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
@@ -178,7 +179,13 @@
     </div>
   </div>
 
-  <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).</div>
+  <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).
+    <button id="nlBtn" aria-expanded="false" aria-controls="nlOpts">Show Namelist Options</button>
+    <span id="nlNote" class="note"></span>
+    <div id="nlOpts" hidden>
+    <div class="row" id="emptyRow"><span class="lbl">default output</span></div>
+    </div>
+  </div>
 
   <button id="infoBtn" aria-expanded="false" aria-controls="info">Show methodology explanation</button>
   <div id="info" hidden>
@@ -247,7 +254,7 @@
 <script src="namelist.js"></script>
 <script>
 let B;
-const state = { mt4s: false, addChem: true, addAtm: true, addExtra: true, off: new Set(), offComp: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
+const state = { mt4s: false, addChem: true, addAtm: true, addExtra: true, off: new Set(), offComp: new Set(), noEmpty: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
 const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;", "unconfirmed": "&#9676;" };
 const LABEL = { "verified": "verified", "source": "in CESM3 source", "spreadsheet-only": "spreadsheet only",
                 "missing": "missing mapping", "unconfirmed": "not in CESM3 source" };
@@ -313,6 +320,12 @@ $("legendBtn").addEventListener("click", () => {
   $("legendBtn").setAttribute("aria-expanded", String(open));
   $("legendBtn").textContent = open ? "Hide legend" : "Show legend";
 });
+$("nlBtn").addEventListener("click", () => {
+  const open = $("nlOpts").hidden;
+  $("nlOpts").hidden = !open;
+  $("nlBtn").setAttribute("aria-expanded", String(open));
+  $("nlBtn").textContent = open ? "Hide Namelist Options" : "Show Namelist Options";
+});
 $("rfBtn").addEventListener("click", () => {
   const open = $("rf").hidden;
   $("rf").hidden = !open;
@@ -326,6 +339,8 @@ function filterNote() {
   if (state.addExtra) on.push("additional");
   $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}`;
   const off = [state.noRealm.size && `${state.noRealm.size} realm(s)`, state.noFreq.size && `${state.noFreq.size} frequenc${state.noFreq.size > 1 ? "ies" : "y"}`].filter(Boolean);
+  const kept = [...state.noEmpty];
+  $("nlNote").textContent = kept.length ? `default output kept for ${kept.join(", ")}` : "";
   $("rfNote").textContent = off.length ? `${off.join(" and ")} turned off` : "all shown";
 }
 $("star").addEventListener("click", () => { showInfo(true); $("info").scrollIntoView({ behavior: "smooth", block: "center" }); });
@@ -559,7 +574,7 @@ function save(text, filename, type) {
 
 const csvCell = (v) => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
 
-const nlMeta = (rows) => ({ iceFields: B.cice_fields, momFields: B.mom_fields, title: `experiment ${state.exp}; ${$("tier").selectedOptions[0].text}`,
+const nlMeta = (rows) => ({ emptyOff: [...state.noEmpty], iceFields: B.cice_fields, momFields: B.mom_fields, title: `experiment ${state.exp}; ${$("tier").selectedOptions[0].text}`,
   unverified: rows.filter(r => r.items.some(x => !["verified", "source"].includes(x.t.st))).length,
   sourceOnly: rows.filter(r => r.items.some(x => x.t.st === "source")).length, sourceConfiguration: B.source_configuration });
 
@@ -615,6 +630,9 @@ function setup() {
   const realms = [...new Set(B.requests.map(r => r.realm))].sort((a, b) =>
     (order.indexOf(b) + 1) - (order.indexOf(a) + 1) || a.localeCompare(b));
   const label = { atmosChem: "atmosChem (chemistry)" };
+  // One checkbox per component whose namelist can switch its default tapes off (CAM, CTSM).
+  $("emptyRow").insertAdjacentHTML("beforeend", Object.entries(Namelist.COMPONENTS).filter(([, c]) => c.empty).map(([k, c]) =>
+    `<label title="Unticked: ${esc(c.empty)} is not set, so ${k} keeps its default output and the listed fields are added to it"><input type="checkbox" data-empty="${k}" checked> ${k}: ${esc(c.empty)} = .true.</label>`).join(""));
   $("realms").insertAdjacentHTML("beforeend", realms.map(x =>
     `<label><input type="checkbox" data-k="realm" value="${esc(x)}" checked> ${esc(label[x] || x)}</label>`).join(""));
   const freqs = [...new Set([...B.requests.map(r => r.f), ...(B.additional || []).map(a => a.f)])].sort();
@@ -644,6 +662,7 @@ document.body.addEventListener("change", (e) => {
   else if (t.dataset.k === "st" || t.dataset.k === "cs") state[t.dataset.k][t.checked ? "add" : "delete"](t.value);
   else if (t.dataset.k === "realm") state.noRealm[t.checked ? "delete" : "add"](t.value);
   else if (t.dataset.k === "f") state.noFreq[t.checked ? "delete" : "add"](t.value);
+  else if (t.dataset.empty) state.noEmpty[t.checked ? "delete" : "add"](t.dataset.empty);
   else if (t.dataset.comp) state.offComp[t.checked ? "delete" : "add"](t.dataset.comp);
   else if (t.id === "mt4sVars") state.addChem = t.checked;
   else if (t.id === "addAtm") state.addAtm = t.checked;

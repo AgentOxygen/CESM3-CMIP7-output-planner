@@ -7,9 +7,9 @@ JS = Path(__file__).resolve().parents[1] / "docs" / "namelist.js"
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 
-def build(comp, rows):
+def build(comp, rows, meta=None):
     rows = [{"items": [], "method": None, **r} for r in rows]
-    code = f"console.log(JSON.stringify(require({json.dumps(str(JS))}).build({json.dumps(comp)}, {json.dumps(rows)})))"
+    code = f"console.log(JSON.stringify(require({json.dumps(str(JS))}).build({json.dumps(comp)}, {json.dumps(rows)}, {json.dumps(meta or {})})))"
     return json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)
 
 
@@ -227,3 +227,16 @@ def test_picontrol_three_hourly_atm_header_is_wrapped():
     assert lines[i + 1].startswith("!   ") and "may not exist in every case" in lines[i + 1]
     assert " nhtfrq = -3" in r["text"] and " mfilt = 240" in r["text"]
     assert r["text"].count("fincl1 = ") == 1
+
+
+def test_empty_htapes_can_be_left_at_its_default_per_component():
+    rows = [{"name": "T", "freq": "day", "method": "A"}]
+    for comp, key in (("atm", "empty_htapes"), ("lnd", "hist_empty_htapes")):
+        on = build(comp, rows)
+        assert f" {key} = .true." in on["text"] and on["validation"]["errors"] == []
+        off = build(comp, rows, {"emptyOff": [comp]})
+        assert f" {key} = .true." not in off["text"] and "left at its default" in off["text"]
+        assert off["validation"]["errors"] == []                  # leaving it out is not an error
+        # opting out one component does not touch the other
+        other, okey = ("lnd", "hist_empty_htapes") if comp == "atm" else ("atm", "empty_htapes")
+        assert f" {okey} = .true." in build(other, rows, {"emptyOff": [comp]})["text"]
