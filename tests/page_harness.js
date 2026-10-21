@@ -50,5 +50,10 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   const build = ctx.Namelist.build;
   ctx.Namelist.build = (c, r, m) => { const x = build(c, r, m); if (c === "atm") x.validation = { errors: ["boom"], warnings: [] }; return x; };
   A.render(); out.errorStatus = /namelist: 1 error\(s\)/.test(main.innerHTML);
+  const rf = mk("rf"), rfb = mk("rfBtn"); rf.hidden = true;   // as in the markup
+  rfb.on.click(); out.rfOpen = { hidden: rf.hidden, aria: rfb.attrs["aria-expanded"], text: rfb.innerHTML };
+  rfb.on.click(); out.rfShut = { hidden: rf.hidden, aria: rfb.attrs["aria-expanded"], text: rfb.innerHTML };
+  out.rfNoteAll = mk("rfNote").textContent;
+  st.noRealm.add("atmos"); st.noFreq.add("mon"); st.noFreq.add("day"); A.render(); out.rfNoteOff = mk("rfNote").textContent;
   console.log(JSON.stringify(out));
 })();

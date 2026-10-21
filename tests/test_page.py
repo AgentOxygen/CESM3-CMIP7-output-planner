@@ -67,3 +67,10 @@ def test_component_checkbox_drops_a_whole_namelist_from_total_charts_and_zip():
 def test_clean_namelist_shows_no_status_but_errors_still_do():
     o = run()
     assert o["cleanStatus"] is False and o["errorStatus"] is True
+
+
+def test_realms_and_frequencies_button_toggles_and_summarises():
+    o = run()
+    assert o["rfOpen"]["hidden"] is False and o["rfOpen"]["aria"] == "true" and "Hide" in o["rfOpen"]["text"]
+    assert o["rfShut"]["hidden"] is True and o["rfShut"]["aria"] == "false" and "Show" in o["rfShut"]["text"]
+    assert o["rfNoteAll"] == "all shown" and o["rfNoteOff"] == "1 realm(s) and 2 frequencies turned off"
