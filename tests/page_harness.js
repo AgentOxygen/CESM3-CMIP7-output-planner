@@ -46,5 +46,9 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   st.offComp.clear(); A.render(); out.compBack = live();
   const o = ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {} });
   out.nl = o.error ? { error: o.error } : { freqs: [...new Set(o.tapes.map(t => t.freq))], errors: o.validation.errors };
+  out.cleanStatus = /namelist: |namelist valid/.test(main.innerHTML);   // a clean namelist says nothing
+  const build = ctx.Namelist.build;
+  ctx.Namelist.build = (c, r, m) => { const x = build(c, r, m); if (c === "atm") x.validation = { errors: ["boom"], warnings: [] }; return x; };
+  A.render(); out.errorStatus = /namelist: 1 error\(s\)/.test(main.innerHTML);
   console.log(JSON.stringify(out));
 })();

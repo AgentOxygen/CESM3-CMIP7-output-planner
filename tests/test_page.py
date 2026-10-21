@@ -62,3 +62,8 @@ def test_component_checkbox_drops_a_whole_namelist_from_total_charts_and_zip():
     assert no_atm["zipDisabled"] is False                          # other components still download
     assert none["checked"] == 0 and none["zipDisabled"] is True and none["tot"] == "0"
     assert back == a                                               # re-enabling restores everything
+
+
+def test_clean_namelist_shows_no_status_but_errors_still_do():
+    o = run()
+    assert o["cleanStatus"] is False and o["errorStatus"] is True

@@ -93,7 +93,7 @@
   #totnote { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
   #additional label:has(input:disabled) { color: var(--muted); }
-  .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); } .sub .ok { color: var(--ok); }
+  .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); }
   .hint { color: var(--muted); padding: 24px 4px; }
   /* volume pies, stacked inside the floating total panel */
   .charts { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; text-align: left; }
@@ -429,7 +429,7 @@ function nlStatus(c, rows) {
   if (o.error) return `, <b class="bad" title="${esc(o.error)}">namelist: not generated</b>`;
   const { errors, warnings } = o.validation, tip = esc([...errors, ...warnings].join("\n"));
   if (errors.length) return `, <b class="bad" title="${tip}">namelist: ${errors.length} error(s)</b>`;
-  return warnings.length ? `, <b class="warn" title="${tip}">namelist: ${warnings.length} warning(s)</b>` : `, <span class="ok" title="parsed back and checked">namelist valid</span>`;
+  return warnings.length ? `, <b class="warn" title="${tip}">namelist: ${warnings.length} warning(s)</b>` : "";
 }
 
 const INFO_TD = '<td class="ib"><button data-info>show info</button></td></tr>';
