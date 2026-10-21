@@ -47,6 +47,7 @@
   #chem { display: flex; gap: 14px; }
   #filters[hidden] { display: none; }
   #chemOpt[hidden] { display: none; }
+  #charts[hidden] { display: none; }   /* .charts sets display:flex, which would otherwise beat the hidden attribute */
   .s-extra { color: var(--accent); }
   #filtersBtn { font-size: 12px; margin-left: 6px; }
   #legendBtn { font-size: 12px; }
@@ -84,17 +85,16 @@
   td.sz.none { color: var(--muted); }
   #total { position: fixed; top: 8px; right: 12px; z-index: 5; background: #fff; text-align: right;
            border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px;
-           box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+           box-shadow: 0 1px 4px rgba(0,0,0,.12); max-height: calc(100vh - 16px); overflow-y: auto; }
   #total b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
   #total button { margin-top: 4px; font-size: 12px; }
-  #total span { display: block; font-size: 11px; color: var(--muted); }
+  #totnote { display: block; font-size: 11px; color: var(--muted); }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
   #additional label:has(input:disabled) { color: var(--muted); }
   .sub .bad { color: var(--bad); } .sub .warn { color: var(--warn); } .sub .ok { color: var(--ok); }
   .hint { color: var(--muted); padding: 24px 4px; }
-  /* legend descriptions on the left, volume pies to their right */
-  .legendwrap { display: flex; flex-wrap: wrap; gap: 8px 40px; align-items: flex-start; }
-  .charts { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+  /* volume pies, stacked inside the floating total panel */
+  .charts { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; text-align: left; }
   .pie { display: flex; gap: 12px; align-items: center; }
   .pie h3 { font-size: 12px; font-weight: 600; margin: 0 0 4px; }
   .pie svg { flex: none; }
@@ -218,7 +218,6 @@
     </ul>
   </div>
 
-  <div class="legendwrap">
   <div class="legend">
     <span><button id="legendBtn" aria-expanded="false">Show legend</button></span>
     <span class="key" hidden><span class="sym s-verified">&#10003;</span> in spreadsheet and registered by a CESM3 run</span>
@@ -229,12 +228,12 @@
     <span class="key" hidden><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
     <span>Click a row to disable or re-enable it.</span>
   </div>
-  <div class="charts" id="charts"></div>
-  </div>
 </header>
 
 <div id="total"><b id="tot">&ndash;</b><button class="star" id="star" title="How this is calculated (raw, uncompressed, lower bound)" aria-label="how the volume is estimated">*</button> GB/yr<span id="totnote"></span>
-  <button id="zip" disabled>download namelists (.zip)</button></div>
+  <button id="zip" disabled>download namelists (.zip)</button>
+  <div><button id="chartsBtn" aria-expanded="false" aria-controls="charts">Show volume charts &#9662;</button></div>
+  <div class="charts" id="charts" hidden></div></div>
 
 <main id="main"><div class="hint">Loading&hellip;</div></main>
 
@@ -295,6 +294,12 @@ function showFilters(open) {
   $("filtersBtn").textContent = open ? "Hide Filters" : "Show Filters";
 }
 $("filtersBtn").addEventListener("click", () => showFilters($("filters").hidden));
+$("chartsBtn").addEventListener("click", () => {
+  const open = $("charts").hidden;
+  $("charts").hidden = !open;
+  $("chartsBtn").setAttribute("aria-expanded", String(open));
+  $("chartsBtn").innerHTML = open ? "Hide volume charts &#9652;" : "Show volume charts &#9662;";
+});
 $("legendBtn").addEventListener("click", () => {
   const open = $("legendBtn").getAttribute("aria-expanded") !== "true";
   document.querySelectorAll(".legend .key").forEach(k => k.hidden = !open);
