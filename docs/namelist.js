@@ -81,8 +81,11 @@
     ...(meta.unverified ? [`${comment} ${meta.unverified} line(s) have no CESM3 source or run-log evidence: an unknown name can abort the run.`] : []),
     ...(meta.sourceOnly ? [`${comment} ${meta.sourceOnly} line(s) are registered by the CESM3 source${meta.sourceConfiguration ? ` for ${meta.sourceConfiguration}` : ""} but were not seen in a run log (names expanded from loops may not exist in every case).`] : [])];
 
+  // meta.version = { short, url } of the planner commit the page was built on, so a generated file can be traced.
+  const versionLine = (meta, comment) => meta.version ? [`${comment} Planner version: ${meta.version.short}`, ...(meta.version.url ? [`${comment}   ${meta.version.url}`] : [])] : [];
   const header = (c, meta) => [
     `! Generated ${meta.date || new Date().toISOString().slice(0, 10)} by the CESM3-CMIP7-output-planner (CMIP7 -> CESM3 variable lists).`,
+    ...versionLine(meta, "!"),
     `! ${c.file}: history output for the selection on the page.`,
     ...(meta.title ? [`! ${meta.title}`] : [])];
 
@@ -169,6 +172,7 @@
     }
     const keys = Object.keys(files).sort((a, b) => ORDER.indexOf(files[a].freq) - ORDER.indexOf(files[b].freq) || a.localeCompare(b));
     const L = [`# Generated ${meta.date || new Date().toISOString().slice(0, 10)} by the CESM3-CMIP7-output-planner (CMIP7 -> CESM3 variable lists).`,
+      ...versionLine(meta, "#"),
       `# ${c.file}: ocean history for the selection on the page. ${meta.title || ""}`,
       `# Copy to SourceMods/src.mom/${c.file} in the case. It REPLACES CESM's default diag_table entirely.`,
       ...evidence(meta, "#"),
