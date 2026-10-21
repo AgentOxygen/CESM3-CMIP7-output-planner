@@ -12,11 +12,11 @@ const document = { getElementById: mk, body: { addEventListener() {} },
   querySelectorAll: () => [{ addEventListener() {} }],
   querySelector: (q) => q.includes("chem") ? { value: chemValue } : mk(q) };
 const ctx = { document, location: { search: "", hostname: "x", pathname: "/" }, URLSearchParams, setInterval() {}, console, Set, Map, Math, Object, Array, JSON, String, Number, Promise,
-  fetch: () => Promise.resolve({ json: () => Promise.resolve(JSON.parse(fs.readFileSync(root + "data.json", "utf8"))) }),
+  fetch: (u) => fs.existsSync(root + u) ? Promise.resolve({ json: () => Promise.resolve(JSON.parse(fs.readFileSync(root + u, "utf8"))) }) : Promise.reject(new Error("404 " + u)),
   URL, Blob: class {}, alert() {}, window: undefined };
 ctx.Namelist = require(root + "namelist.js");
 vm.createContext(ctx);
-vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get current() { return current; }, B: () => B, syncChem: typeof syncChem === 'function' ? syncChem : null };", ctx);
+vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get current() { return current; }, planner: () => planner, B: () => B, syncChem: typeof syncChem === 'function' ? syncChem : null };", ctx);
 (async () => {
   await new Promise(r => setTimeout(r, 50));
   const A = ctx.__api, st = A.state, main = mk("main"), out = {};
@@ -55,6 +55,8 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   rfb.on.click(); out.rfShut = { hidden: rf.hidden, aria: rfb.attrs["aria-expanded"], text: rfb.innerHTML };
   out.rfNoteAll = mk("rfNote").textContent;
   st.noRealm.add("atmos"); st.noFreq.add("mon"); st.noFreq.add("day"); A.render(); out.rfNoteOff = mk("rfNote").textContent;
+  out.plannerSrc = mk("plannerSrc").innerHTML;
+  out.versionInNamelist = ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {}, version: A.planner() }).text;
   const nb = mk("nlBtn"), no = mk("nlOpts"); no.hidden = true;   // as in the markup
   nb.on.click(); out.nlOpen = { hidden: no.hidden, aria: nb.attrs["aria-expanded"], text: nb.textContent };
   nb.on.click(); out.nlShut = { hidden: no.hidden, aria: nb.attrs["aria-expanded"], text: nb.textContent };

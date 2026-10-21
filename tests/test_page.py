@@ -83,3 +83,10 @@ def test_namelist_options_button_and_empty_htapes_checkboxes():
     assert o["emptyBoxes"] == ["atm", "lnd"]                      # only the components whose namelist has such a switch
     assert o["emptyOn"] is True and o["nlNoteAll"] == ""          # default: on, as before
     assert o["emptyOff"] is False and o["nlNoteOff"] == "default output kept for atm"
+
+
+def test_planner_version_is_linked_on_the_page_and_written_into_namelists():
+    o = run()
+    v = json.loads((Path(__file__).parent.parent / "docs" / "version.json").read_text())
+    assert f"/commit/{v['commit']}" in o["plannerSrc"] and v["short"] in o["plannerSrc"]
+    assert f"! Planner version: {v['short']}\n!   {v['repo']}/commit/{v['commit']}\n" in o["versionInNamelist"]

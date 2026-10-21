@@ -229,6 +229,17 @@ def test_picontrol_three_hourly_atm_header_is_wrapped():
     assert r["text"].count("fincl1 = ") == 1
 
 
+def test_every_header_carries_the_planner_version_when_known():
+    v = {"version": {"short": "abc1234", "url": "https://example.org/commit/abc"}}
+    rows = {"atm": [{"name": "T", "freq": "day", "method": "A"}], "lnd": [{"name": "TSA", "freq": "day", "method": "A"}],
+            "rof": [{"name": "Q", "freq": "day", "method": "A"}], "ice": [{"name": "aice", "freq": "mon", "method": "A"}],
+            "glc": [{"name": "thk", "freq": "yr", "method": "A"}], "ocn": [{"name": "tos", "freq": "mon", "method": "A"}]}
+    for comp, r in rows.items():
+        text = build(comp, r, v)["text"]
+        assert "Planner version: abc1234\n" in text and "https://example.org/commit/abc\n" in text, comp
+        assert "Planner version" not in build(comp, r)["text"], comp      # unknown version: no line
+
+
 def test_empty_htapes_can_be_left_at_its_default_per_component():
     rows = [{"name": "T", "freq": "day", "method": "A"}]
     for comp, key in (("atm", "empty_htapes"), ("lnd", "hist_empty_htapes")):

@@ -113,7 +113,7 @@
 
 <header>
   <h1>CMIP7 data request &rarr; CESM3 history variables</h1>
-  <div class="subtitle">CESM3 source:
+  <div class="subtitle">Planner Source: <span id="plannerSrc">unknown</span> &middot; CESM3 source:
     <a href="https://github.com/ESCOMP/CESM/tree/cesm3_0_alpha11d" target="_blank" rel="noopener">cesm3_0_alpha11d</a>
     &middot; CMIP7 data request:
     <a href="https://wcrp-cmip.org/cmip7-data-request-v1-1/" target="_blank" rel="noopener">v1.1</a></div>
@@ -574,7 +574,13 @@ function save(text, filename, type) {
 
 const csvCell = (v) => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
 
-const nlMeta = (rows) => ({ emptyOff: [...state.noEmpty], iceFields: B.cice_fields, momFields: B.mom_fields, title: `experiment ${state.exp}; ${$("tier").selectedOptions[0].text}`,
+let planner = null;   // docs/version.json: { commit, short, repo }, written by `make stamp`; absent is fine
+fetch("version.json").then(r => r.json()).then(v => {
+  if (!v.commit) return;
+  planner = { short: v.short, url: v.repo ? `${v.repo}/commit/${v.commit}` : "" };
+  $("plannerSrc").innerHTML = planner.url ? `<a href="${esc(planner.url)}" target="_blank" rel="noopener">${esc(v.short)}</a>` : esc(v.short);
+}).catch(() => {});
+const nlMeta = (rows) => ({ version: planner, emptyOff: [...state.noEmpty], iceFields: B.cice_fields, momFields: B.mom_fields, title: `experiment ${state.exp}; ${$("tier").selectedOptions[0].text}`,
   unverified: rows.filter(r => r.items.some(x => !["verified", "source"].includes(x.t.st))).length,
   sourceOnly: rows.filter(r => r.items.some(x => x.t.st === "source")).length, sourceConfiguration: B.source_configuration });
 
