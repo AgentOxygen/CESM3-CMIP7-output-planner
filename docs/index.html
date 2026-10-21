@@ -67,6 +67,8 @@
   details.comp > summary { cursor: pointer; padding: 8px 4px; font-weight: 600; display: flex;
                            gap: 12px; align-items: center; }
   summary .sub { font-weight: 400; color: var(--muted); flex: 1; }
+  details.comp.off > summary > span:first-of-type { color: var(--muted); }
+  summary input.compon { margin: 0 8px 0 0; align-self: center; }
   .scroll { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; }
   td { padding: 2px 6px; border-top: 1px solid #f0f1f3; vertical-align: top; }
@@ -240,7 +242,7 @@
 <script src="namelist.js"></script>
 <script>
 let B;
-const state = { mt4s: false, addChem: true, addAtm: true, addExtra: true, off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
+const state = { mt4s: false, addChem: true, addAtm: true, addExtra: true, off: new Set(), offComp: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
 const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;", "unconfirmed": "&#9676;" };
 const LABEL = { "verified": "verified", "source": "in CESM3 source", "spreadsheet-only": "spreadsheet only",
                 "missing": "missing mapping", "unconfirmed": "not in CESM3 source" };
@@ -317,7 +319,7 @@ $("star").addEventListener("click", () => { showInfo(true); $("info").scrollInto
 
 // --- volume -----------------------------------------------------------------
 
-const fmtGB = (gb) => gb < 0.005 ? "<0.01" : gb >= 100 ? Math.round(gb).toLocaleString() : gb.toFixed(2);
+const fmtGB = (gb) => gb === 0 ? "0" : gb < 0.005 ? "<0.01" : gb >= 100 ? Math.round(gb).toLocaleString() : gb.toFixed(2);
 
 // {gb} for one (component, variable, frequency) line, or {why} if it cannot be priced.
 function price(c, name, freq) {
@@ -413,7 +415,7 @@ function compute() {
 
 // Lines the user has not disabled, sorted; what the totals and downloads use.
 const offKey = (c, k) => c + "|" + k;
-const active = (c) => [...current.comps[c].values()].filter(r => !state.off.has(offKey(c, r.key))).sort(byLine);
+const active = (c) => state.offComp.has(c) ? [] : [...current.comps[c].values()].filter(r => !state.off.has(offKey(c, r.key))).sort(byLine);
 
 // --- rendering --------------------------------------------------------------
 
@@ -443,20 +445,21 @@ function render() {
   for (const c of B.components) for (const row of current.comps[c].values()) {
     const p = price(c, row.name, row.freq);
     row.p = p;
-    if (state.off.has(offKey(c, row.key))) continue;
+    if (state.offComp.has(c) || state.off.has(offKey(c, row.key))) continue;
     lines++;
     if (p.gb === undefined) unpriced++; else { total += p.gb; sub[c] = (sub[c] || 0) + p.gb; byFreq[row.freq] = (byFreq[row.freq] || 0) + p.gb; }
   }
   drawPies(sub, byFreq);
   $("tot").textContent = fmtGB(total);
   $("totnote").textContent = `${lines - unpriced} of ${lines} lines priced`;
-  const parts = [`<div id="summary"><span>${current.nreq} CMIP7 requests for <b>${esc(state.exp)}</b>.${state.off.size ? ` ${state.off.size} line(s) disabled <a data-reset>re-enable all</a>` : ""}</span><span class="dl">Downloads</span></div>`];
+  const parts = [`<div id="summary"><span>${current.nreq} CMIP7 requests for <b>${esc(state.exp)}</b>.${state.off.size || state.offComp.size ? ` ${[state.off.size && `${state.off.size} line(s)`, state.offComp.size && `${state.offComp.size} component(s)`].filter(Boolean).join(" and ")} disabled <a data-reset>re-enable all</a>` : ""}</span><span class="dl">Downloads</span></div>`];
   for (const c of B.components) {
-    const all = [...current.comps[c].values()].sort(byLine), rows = all.filter(r => !state.off.has(offKey(c, r.key)));
+    const all = [...current.comps[c].values()].sort(byLine), dis = state.offComp.has(c), rows = dis ? [] : all.filter(r => !state.off.has(offKey(c, r.key)));
     const miss = current.missing[c];
     if (!all.length && !miss.length) continue;
-    parts.push(`<details class="comp" data-c="${c}" ${openComps.has(c) ? "open" : ""}><summary><span>${c}</span>` +
-      `<span class="sub">${rows.length} variable/frequency lines` + (sub[c] ? `, ${esc(fmtGB(sub[c]))} GB/yr` : "") + nlStatus(c, rows) + (miss.length ? `, ${miss.length} requests with no mapping` : "") + `</span>` +
+    parts.push(`<details class="comp${dis ? " off" : ""}" data-c="${c}" ${openComps.has(c) ? "open" : ""}><summary>` +
+      `<input type="checkbox" class="compon" data-comp="${c}" ${dis ? "" : "checked"} title="include ${c} in the total and downloads" aria-label="include ${c}"><span>${c}</span>` +
+      `<span class="sub">` + (dis ? "disabled: left out of the total and downloads" : `${rows.length} variable/frequency lines` + (sub[c] ? `, ${esc(fmtGB(sub[c]))} GB/yr` : "") + nlStatus(c, rows) + (miss.length ? `, ${miss.length} requests with no mapping` : "")) + `</span>` +
       (Namelist.COMPONENTS[c] ? `<button data-dl="nl" data-c="${c}" ${rows.length ? "" : "disabled"} title="history namelist for ${c}">${Namelist.COMPONENTS[c].file}</button>` : "") +
       `<button data-dl="txt" data-c="${c}" ${rows.length ? "" : "disabled"} title="plain list of VARIABLE FREQUENCY lines">raw_text</button>` +
       `<button data-dl="csv" data-c="${c}" ${rows.length ? "" : "disabled"} title="audit trail: every line traced to its spreadsheet rows">csv</button></summary>` +
@@ -516,7 +519,7 @@ $("main").addEventListener("toggle", (e) => {
 $("main").addEventListener("click", (e) => {
   const dl = e.target.closest("button[data-dl]");
   if (dl) { e.preventDefault(); download(dl.dataset.dl, dl.dataset.c); return; }
-  if (e.target.closest("[data-reset]")) { state.off.clear(); render(); return; }
+  if (e.target.closest("[data-reset]")) { state.off.clear(); state.offComp.clear(); render(); return; }
   const tr = e.target.closest("tr.item");
   if (!tr) return;
   if (!e.target.closest("button[data-info]")) {
@@ -628,6 +631,7 @@ document.body.addEventListener("change", (e) => {
   else if (t.dataset.k === "st" || t.dataset.k === "cs") state[t.dataset.k][t.checked ? "add" : "delete"](t.value);
   else if (t.dataset.k === "realm") state.noRealm[t.checked ? "delete" : "add"](t.value);
   else if (t.dataset.k === "f") state.noFreq[t.checked ? "delete" : "add"](t.value);
+  else if (t.dataset.comp) state.offComp[t.checked ? "delete" : "add"](t.dataset.comp);
   else if (t.id === "mt4sVars") state.addChem = t.checked;
   else if (t.id === "addAtm") state.addAtm = t.checked;
   else if (t.id === "addExtra") state.addExtra = t.checked;

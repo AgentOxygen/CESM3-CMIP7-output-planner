@@ -50,3 +50,15 @@ def test_elements_that_start_hidden_can_actually_hide():
     assert {"charts", "info", "filters", "chemOpt"} <= ids
     for i in ids:
         assert re.search(rf"#{i}\[hidden\]\s*\{{\s*display:\s*none", html), f"#{i}[hidden] has no display:none rule"
+
+
+def test_component_checkbox_drops_a_whole_namelist_from_total_charts_and_zip():
+    o = run()
+    a, no_atm, none, back = o["compAll"], o["compNoAtm"], o["compNone"], o["compBack"]
+    assert a["boxes"] == a["checked"] > 1                          # one checkbox per listed component, all on by default
+    assert no_atm["boxes"] == a["boxes"] and no_atm["checked"] == a["checked"] - 1 and o["compNoAtmHtml"]
+    assert float(no_atm["tot"].replace(",", "")) < float(a["tot"].replace(",", ""))    # atm's volume leaves the total
+    assert "atm" in a["charts"] and "atm" not in no_atm["charts"]  # ...and the component pie
+    assert no_atm["zipDisabled"] is False                          # other components still download
+    assert none["checked"] == 0 and none["zipDisabled"] is True and none["tot"] == "0"
+    assert back == a                                               # re-enabling restores everything
