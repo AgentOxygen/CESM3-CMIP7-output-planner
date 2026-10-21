@@ -154,9 +154,8 @@
         <span class="pill realm-fallback">realm</span> CMIP7 realm guess <i id="n-cs-realm-fallback"></i></label>
     </div>
     <div class="row"><span class="lbl">additional</span>
-      <label title="Add Simone's variables to whatever the mapping filters show. Uncheck every mapping box above to see only these."><input type="checkbox" id="addExtra" checked disabled>
+      <label title="Add Simone's variables to whatever the mapping filters show. Uncheck every mapping box above to see only these."><input type="checkbox" id="addExtra" checked>
         include additional variables (<span class="sym s-extra">&#10010;</span>)</label>
-      <span class="note">MTt4s only</span>
     </div>
     </div>
   </div>
@@ -226,7 +225,7 @@
     <span class="key" hidden><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
     <span class="key" hidden><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
     <span class="key" hidden><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
-    <span class="key" hidden><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request (MTt4s only)</span>
+    <span class="key" hidden><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request</span>
     <span class="key" hidden><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
     <span>Click a row to disable or re-enable it.</span>
   </div>
@@ -306,7 +305,7 @@ $("legendBtn").addEventListener("click", () => {
 function filterNote() {
   const on = [...document.querySelectorAll("#filters input[data-k=st]")].filter(c => c.checked)
     .map(c => ({ verified: "verified", source: "in source", "spreadsheet-only": "spreadsheet only", missing: "missing" })[c.value]);
-  if (state.mt4s && state.addExtra) on.push("additional");
+  if (state.addExtra) on.push("additional");
   $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}`;
 }
 $("star").addEventListener("click", () => { showInfo(true); $("info").scrollIntoView({ behavior: "smooth", block: "center" }); });
@@ -388,9 +387,9 @@ function compute() {
       m.get(key).items.push({ r, t });
     }
   }
-  if (state.mt4s && state.addExtra) {
+  if (state.addExtra) {
     for (const a of B.additional || []) {
-      if (!(a.g === "chemistry-only" ? state.addChem : state.addAtm)) continue;
+      if (!(a.g === "chemistry-only" ? state.mt4s && state.addChem : state.addAtm)) continue;
       if (state.noFreq.has(a.f)) continue;
       if (a.rq) continue;      // already a CMIP7 row: don't add it twice
       const key = a.n + "|" + a.m + "|" + a.f, m = comps[a.c];
@@ -608,11 +607,10 @@ function setup() {
 }
 
 // The browser may restore the radio after a reload, so sync the checkbox on load as well as on change.
-// Additional variables exist for MTt4s only: elsewhere their checkboxes are off the page or disabled.
+// Only the chemistry-only additions need MTt4s; Simone's tape additions are registered by MTso too.
 function syncChem() {
   state.mt4s = document.querySelector("input[name=chem]:checked").value === "chem";
   $("chemOpt").hidden = !state.mt4s;
-  for (const id of ["addAtm", "addExtra"]) $(id).disabled = !state.mt4s;
 }
 document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", syncChem));
 syncChem();
