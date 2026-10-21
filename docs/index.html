@@ -46,10 +46,11 @@
   .ctl .wide { grid-column: 2 / span 3; justify-self: start; }
   #chem { display: flex; gap: 14px; }
   #filters[hidden] { display: none; }
+  #rf[hidden] { display: none; }
   #chemOpt[hidden] { display: none; }
   #charts[hidden] { display: none; }   /* .charts sets display:flex, which would otherwise beat the hidden attribute */
   .s-extra { color: var(--accent); }
-  #filtersBtn { font-size: 12px; margin-left: 6px; }
+  #filtersBtn, #rfBtn { font-size: 12px; margin-left: 6px; }
   #legendBtn { font-size: 12px; }
   #filterNote { margin-left: 8px; }
   .legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
@@ -162,7 +163,10 @@
     </div>
   </div>
 
-  <div class="step"><b>3</b> Realms and frequencies requested
+  <div class="step"><b>3</b> Realms, Frequencies, + Additional Requested
+    <button id="rfBtn" aria-expanded="false" aria-controls="rf">Show Options</button>
+    <span id="rfNote" class="note"></span>
+    <div id="rf" hidden>
     <div class="row" id="realms"><span class="lbl">realm</span></div>
     <div class="row" id="freqs"><span class="lbl">frequency</span></div>
     <div class="row" id="additional"><span class="lbl"><span class="sym s-extra" title="additional variable, not in the CMIP7 request">&#10010;</span> additional (not CMIP7)</span>
@@ -170,7 +174,8 @@
       <label><input type="checkbox" id="addAtm" checked> atmosphere</label>
       <label><input type="checkbox" id="addLand" checked disabled> land (not implemented)</label>
       <label><input type="checkbox" id="addOcean" checked disabled> ocean (not implemented)</label>
-</div>
+    </div>
+    </div>
   </div>
 
   <div class="step"><b>4</b> Download namelists by component (below) or as .zip archive (top right).</div>
@@ -308,12 +313,20 @@ $("legendBtn").addEventListener("click", () => {
   $("legendBtn").setAttribute("aria-expanded", String(open));
   $("legendBtn").textContent = open ? "Hide legend" : "Show legend";
 });
+$("rfBtn").addEventListener("click", () => {
+  const open = $("rf").hidden;
+  $("rf").hidden = !open;
+  $("rfBtn").setAttribute("aria-expanded", String(open));
+  $("rfBtn").innerHTML = open ? "Hide Options" : "Show Options";
+});
 // With the filters tucked away, say what they currently let through.
 function filterNote() {
   const on = [...document.querySelectorAll("#filters input[data-k=st]")].filter(c => c.checked)
     .map(c => ({ verified: "verified", source: "in source", "spreadsheet-only": "spreadsheet only", missing: "missing" })[c.value]);
   if (state.addExtra) on.push("additional");
   $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}`;
+  const off = [state.noRealm.size && `${state.noRealm.size} realm(s)`, state.noFreq.size && `${state.noFreq.size} frequenc${state.noFreq.size > 1 ? "ies" : "y"}`].filter(Boolean);
+  $("rfNote").textContent = off.length ? `${off.join(" and ")} turned off` : "all shown";
 }
 $("star").addEventListener("click", () => { showInfo(true); $("info").scrollIntoView({ behavior: "smooth", block: "center" }); });
 
