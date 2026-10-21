@@ -1,8 +1,8 @@
 # Notes: MTt4s / additional (non-CMIP7) variables
 
-Status: **page toggle only**. The configuration radio and the "additional (not CMIP7)" row
-(interactive chemistry, land, ocean) exist in `index.html` but change no output. Land and ocean
-are labelled "(not implemented)". Interactive chemistry is the first to be wired.
+Status: **atmosphere wired**. "Simone's additions" (list 1 below, 154 names) apply in both
+configurations: all are registered in the MTso log. Only the chemistry-only additions (120) need
+MTt4s. Land and ocean are labelled "(not implemented)".
 
 Source reviewed: a generated CAM namelist (`gen_cam_cmip7_only.py`, CMIP7 request table
 v1.2.2.5.26Oct14, field check against the beta09 MTso master field list; stands in for alpha11b).

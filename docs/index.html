@@ -49,6 +49,7 @@
   #chemOpt[hidden] { display: none; }
   .s-extra { color: var(--accent); }
   #filtersBtn { font-size: 12px; margin-left: 6px; }
+  #legendBtn { font-size: 12px; }
   #filterNote { margin-left: 8px; }
   .legend { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
   .sym { display: inline-block; min-width: 1.2em; text-align: center; font-weight: 700; }
@@ -145,8 +146,6 @@
         <span class="sym s-spreadsheet-only">&#9680;</span> spreadsheet only (not in log or source) <i id="n-spreadsheet-only"></i></label>
       <label><input type="checkbox" data-k="st" value="missing">
         <span class="sym s-missing">&#9888;</span> missing mapping <i id="n-missing"></i></label>
-      <label><input type="checkbox" data-k="st" value="unconfirmed">
-        additional, not in CESM3 source <i id="n-unconfirmed"></i></label>
     </div>
     <div class="row"><span class="lbl">component from</span>
       <label><input type="checkbox" data-k="cs" value="log" checked> CESM3 log <i id="n-cs-log"></i></label>
@@ -155,10 +154,8 @@
         <span class="pill realm-fallback">realm</span> CMIP7 realm guess <i id="n-cs-realm-fallback"></i></label>
     </div>
     <div class="row"><span class="lbl">additional</span>
-      <label><input type="checkbox" id="addOnly" disabled> show additional variables only (<span class="sym s-extra">&#10010;</span>)</label>
-      <label title="Additional variables that the CMIP7 request also asks for and the CESM3 source registers"><input type="checkbox" id="addBoth" disabled>
-        show additional variables that are also in the CMIP7 request <i id="n-both"></i></label>
-      <span class="note">MTt4s only</span>
+      <label title="Add Simone's variables to whatever the mapping filters show. Uncheck every mapping box above to see only these."><input type="checkbox" id="addExtra" checked>
+        include additional variables (<span class="sym s-extra">&#10010;</span>)</label>
     </div>
     </div>
   </div>
@@ -223,13 +220,14 @@
 
   <div class="legendwrap">
   <div class="legend">
-    <span><span class="sym s-verified">&#10003;</span> in spreadsheet and registered by a CESM3 run</span>
-    <span><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
-    <span><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
-    <span><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
-    <span><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request (MTt4s only)</span>
-    <span><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
-    <span>Click a row to disable or re-enable it (excluded from the namelists and the total); &ldquo;show info&rdquo; audits it.</span>
+    <span><button id="legendBtn" aria-expanded="false">Show legend</button></span>
+    <span class="key" hidden><span class="sym s-verified">&#10003;</span> in spreadsheet and registered by a CESM3 run</span>
+    <span class="key" hidden><span class="sym s-source">&#9679;</span> registered by the CESM3 source for the baseline configuration, not seen in the run log</span>
+    <span class="key" hidden><span class="sym s-spreadsheet-only">&#9680;</span> in spreadsheet, in neither a log nor the CESM3 source</span>
+    <span class="key" hidden><span class="sym s-missing">&#9888;</span> spreadsheet gives no CESM name</span>
+    <span class="key" hidden><span class="sym s-extra">&#10010;</span> additional variable, not in the CMIP7 request</span>
+    <span class="key" hidden><span class="pill mm">&ne;realm</span> log put it in a different component than its realm implies</span>
+    <span>Click a row to disable or re-enable it.</span>
   </div>
   <div class="charts" id="charts"></div>
   </div>
@@ -243,7 +241,7 @@
 <script src="namelist.js"></script>
 <script>
 let B;
-const state = { mt4s: false, addChem: true, addAtm: true, addOnly: false, addBoth: false, off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
+const state = { mt4s: false, addChem: true, addAtm: true, addExtra: true, off: new Set(), exp: "", tier: "all", st: new Set(), cs: new Set(), noFreq: new Set(), noRealm: new Set(), cfg: 0 };
 const GLYPH = { "verified": "&#10003;", "source": "&#9679;", "spreadsheet-only": "&#9680;", "missing": "&#9888;", "unconfirmed": "&#9676;" };
 const LABEL = { "verified": "verified", "source": "in CESM3 source", "spreadsheet-only": "spreadsheet only",
                 "missing": "missing mapping", "unconfirmed": "not in CESM3 source" };
@@ -297,12 +295,18 @@ function showFilters(open) {
   $("filtersBtn").textContent = open ? "Hide Filters" : "Show Filters";
 }
 $("filtersBtn").addEventListener("click", () => showFilters($("filters").hidden));
+$("legendBtn").addEventListener("click", () => {
+  const open = $("legendBtn").getAttribute("aria-expanded") !== "true";
+  document.querySelectorAll(".legend .key").forEach(k => k.hidden = !open);
+  $("legendBtn").setAttribute("aria-expanded", String(open));
+  $("legendBtn").textContent = open ? "Hide legend" : "Show legend";
+});
 // With the filters tucked away, say what they currently let through.
 function filterNote() {
   const on = [...document.querySelectorAll("#filters input[data-k=st]")].filter(c => c.checked)
     .map(c => ({ verified: "verified", source: "in source", "spreadsheet-only": "spreadsheet only", missing: "missing" })[c.value]);
-  const extra = [state.mt4s && state.addOnly && "additional only", state.mt4s && state.addBoth && "additional also in CMIP7"].filter(Boolean);
-  $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}${extra.length ? "; " + extra.join(" + ") : ""}`;
+  if (state.addExtra) on.push("additional");
+  $("filterNote").textContent = `showing: ${on.join(", ") || "nothing"}`;
 }
 $("star").addEventListener("click", () => { showInfo(true); $("info").scrollIntoView({ behavior: "smooth", block: "center" }); });
 
@@ -366,7 +370,7 @@ function compute() {
   const comps = {}, missing = {};
   for (const c of B.components) { comps[c] = new Map(); missing[c] = []; }
   const counts = { "verified": 0, "source": 0, "spreadsheet-only": 0, "missing": 0,
-                   "cs-log": 0, "cs-source": 0, "cs-realm-fallback": 0, "unconfirmed": 0, "both": 0 };
+                   "cs-log": 0, "cs-source": 0, "cs-realm-fallback": 0 };
   const reqs = selected();
   for (const r of reqs) {
     if (state.noFreq.has(r.f) || state.noRealm.has(r.realm)) continue;
@@ -383,17 +387,11 @@ function compute() {
       m.get(key).items.push({ r, t });
     }
   }
-  if (state.mt4s) {
+  if (state.addExtra) {
     for (const a of B.additional || []) {
-      if (!(a.g === "chemistry-only" ? state.addChem : state.addAtm)) continue;
+      if (!(a.g === "chemistry-only" ? state.mt4s && state.addChem : state.addAtm)) continue;
       if (state.noFreq.has(a.f)) continue;
-      if (a.rq) {      // already a CMIP7 row: mark it, don't add it twice
-        const row = comps[a.c].get(a.n + "|" + a.m + "|" + a.f);
-        if (row && row.items.some(x => ["verified", "source"].includes(x.t.st))) { row.simone = true; counts.both++; }
-        continue;
-      }
-      counts.unconfirmed += a.st === "unconfirmed";
-      if (!state.st.has(a.st)) continue;
+      if (a.rq) continue;      // already a CMIP7 row: don't add it twice
       const key = a.n + "|" + a.m + "|" + a.f, m = comps[a.c];
       const why = a.g === "chemistry-only"
         ? "Simone&rsquo;s chemistry-only request (only exists with interactive chemistry); the frequency is assumed (monthly mean), the namelist gives none"
@@ -403,12 +401,6 @@ function compute() {
       const t = { n: a.n, c: a.c, m: a.m, st: a.st, cs: "additional", sc: a.sc, ref: a.ref, log: [], mm: false, al: null };
       if (!m.has(key)) m.set(key, { key, name: a.n, method: a.m, freq: a.f, items: [] });
       m.get(key).items.push({ r, t, extra: true });
-    }
-    if (state.addOnly || state.addBoth) {
-      for (const c of B.components) {
-        for (const [k, row] of comps[c]) if (!((state.addOnly && extraRow(row)) || (state.addBoth && row.simone))) comps[c].delete(k);
-        missing[c] = [];
-      }
     }
   }
   return { comps, missing, counts, nreq: reqs.length };
@@ -615,11 +607,10 @@ function setup() {
 }
 
 // The browser may restore the radio after a reload, so sync the checkbox on load as well as on change.
-// Additional variables exist for MTt4s only: elsewhere their checkboxes are off the page or disabled.
+// Only the chemistry-only additions need MTt4s; Simone's tape additions are registered by MTso too.
 function syncChem() {
   state.mt4s = document.querySelector("input[name=chem]:checked").value === "chem";
   $("chemOpt").hidden = !state.mt4s;
-  for (const id of ["addAtm", "addOnly", "addBoth"]) $(id).disabled = !state.mt4s;
 }
 document.querySelectorAll("input[name=chem]").forEach(r => r.addEventListener("change", syncChem));
 syncChem();
@@ -634,8 +625,7 @@ document.body.addEventListener("change", (e) => {
   else if (t.dataset.k === "f") state.noFreq[t.checked ? "delete" : "add"](t.value);
   else if (t.id === "mt4sVars") state.addChem = t.checked;
   else if (t.id === "addAtm") state.addAtm = t.checked;
-  else if (t.id === "addOnly") state.addOnly = t.checked;
-  else if (t.id === "addBoth") state.addBoth = t.checked;
+  else if (t.id === "addExtra") state.addExtra = t.checked;
   else if (t.name === "chem") { /* handled by syncChem */ }
   else return;
   render();
