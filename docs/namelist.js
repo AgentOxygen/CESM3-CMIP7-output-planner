@@ -26,6 +26,8 @@
     ocn: { file: "diag_table.unresolved", ocn: true },
   };
   const q = (s) => `'${s}'`;
+  // empty_htapes (CAM) / hist_empty_htapes (CTSM) discards the model's default tapes; the page can opt a component out of it.
+  const emptyOn = (c, comp, meta) => !!c.empty && !(meta.emptyOff || []).includes(comp);
 
   const WIDTH = 100;          // wrap lists here; Fortran namelist lines must stay under 132
   // Pack pre-formatted items onto lines at most WIDTH wide: `first` starts the first line, `indent` the rest.
@@ -246,7 +248,7 @@
         const len = (get(c.pre + k) || "").split(",").filter(x => x.trim()).length;
         if (len !== n) errors.push(`${c.pre}${k} lists ${len} values but ${c.pre}nhtfrq lists ${n}`);
       }
-      if (c.empty && !/\.true\./i.test(get(c.empty) || "")) errors.push(`${c.empty} is not .true.`);
+      if (emptyOn(c, comp, meta) && !/\.true\./i.test(get(c.empty) || "")) errors.push(`${c.empty} is not .true.`);
       const got = new Set(), fincl = st.filter(x => x[0].startsWith(c.pre + "fincl"));
       if (fincl.length !== n) errors.push(`${fincl.length} fincl lists for ${n} tapes`);
       for (const [k, v] of fincl) {
@@ -308,14 +310,15 @@
                       `${c.file} allows ${c.maxTapes}. Drop a frequency.` };
     }
     const L = [...header(c, meta),
-               c.empty ? `! ${c.empty} = .true. DISCARDS ${comp}'s default output: only the fields below are written.`
-                       : `! ${comp} cannot switch its defaults off: the fields below are ADDED to the model's default output.`,
+               emptyOn(c, comp, meta) ? `! ${c.empty} = .true. DISCARDS ${comp}'s default output: only the fields below are written.`
+                 : c.empty ? `! ${c.empty} is left at its default (not set here): the fields below are ADDED to the model's default output, and the default tapes keep their own frequencies.`
+                 : `! ${comp} cannot switch its defaults off: the fields below are ADDED to the model's default output.`,
                ...evidence(meta, "!"),
                `! nhtfrq assumes a 365-day calendar for yr and dec. Unverified by running a case.`];
     if (!tapes.length) return { text: L.concat("! (nothing to export)", tail(rows, dropped, "!")).join("\n") + "\n", tapes, dropped };
     L.push("", "! tape  frequency  nhtfrq  mfilt  fields",
            ...tapes.map((t, i) => `! h${i}`.padEnd(7) + t.freq.padEnd(11) + String(FREQ[t.freq][0]).padEnd(8) + String(FREQ[t.freq][1]).padEnd(7) + t.entries.length));
-    L.push("", ...(c.empty ? [` ${c.empty} = .true.`] : []),
+    L.push("", ...(emptyOn(c, comp, meta) ? [` ${c.empty} = .true.`] : []),
            ` ${c.pre}nhtfrq = ${tapes.map(t => FREQ[t.freq][0]).join(", ")}`,
            ` ${c.pre}mfilt = ${tapes.map(t => FREQ[t.freq][1]).join(", ")}`);
     if (c.dov2xy) L.push(` ${c.pre}dov2xy = ${tapes.map(() => ".true.").join(", ")}`);
