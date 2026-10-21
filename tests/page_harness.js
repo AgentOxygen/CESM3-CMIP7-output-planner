@@ -5,7 +5,7 @@ const html = fs.readFileSync(root + "index.html", "utf8");
 const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const els = {};
 const mk = (id) => els[id] ||= { id, innerHTML: "", textContent: "", hidden: false, disabled: false, checked: true, value: "", dataset: {}, children: [],
-  setAttribute() {}, addEventListener() {}, insertAdjacentHTML(_, h) { this.innerHTML += h; }, selectedOptions: [{ text: "everything" }], selectedIndex: 0,
+  setAttribute(k, v) { (this.attrs ||= {})[k] = v; }, addEventListener(t, f) { (this.on ||= {})[t] = f; }, insertAdjacentHTML(_, h) { this.innerHTML += h; }, selectedOptions: [{ text: "everything" }], selectedIndex: 0,
   closest() { return null; }, scrollIntoView() {} };
 let chemValue = "MTso";
 const document = { getElementById: mk, body: { addEventListener() {} },
@@ -34,6 +34,10 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   st.st = keepSt;
   st.addAtm = true; chemValue = "MTso"; A.syncChem(); A.render(); out.back = sum(); out.chemOptHiddenAgain = mk("chemOpt").hidden;
   chemValue = "chem"; A.syncChem(); A.render();
+  out.pies = (mk("charts").innerHTML.match(/class="pie"/g) || []).length;
+  const ch = mk("charts"), btn = mk("chartsBtn"); ch.hidden = true;   // as in the markup
+  btn.on.click(); out.chartsOpen = { hidden: ch.hidden, aria: btn.attrs["aria-expanded"], text: btn.innerHTML };
+  btn.on.click(); out.chartsShut = { hidden: ch.hidden, aria: btn.attrs["aria-expanded"], text: btn.innerHTML };
   const o = ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {} });
   out.nl = o.error ? { error: o.error } : { freqs: [...new Set(o.tapes.map(t => t.freq))], errors: o.validation.errors };
   console.log(JSON.stringify(out));

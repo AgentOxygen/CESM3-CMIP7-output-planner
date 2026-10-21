@@ -1,5 +1,5 @@
 """Drives the page script under node with a stubbed DOM (skipped where node is absent)."""
-import json, shutil, subprocess
+import json, re, shutil, subprocess
 from pathlib import Path
 import pytest
 
@@ -33,3 +33,20 @@ def test_additional_checkbox_is_inclusive_and_group_checkboxes():
 def test_namelist_with_additions_has_a_5day_tape_and_validates():
     nl = run()["nl"]
     assert "error" not in nl and "5day" in nl["freqs"] and nl["errors"] == []
+
+
+def test_volume_charts_button_toggles_the_charts_panel():
+    o = run()
+    assert o["pies"] == 2                                          # both pies are drawn into #charts
+    assert o["chartsOpen"]["hidden"] is False and o["chartsOpen"]["aria"] == "true" and "Hide" in o["chartsOpen"]["text"]
+    assert o["chartsShut"]["hidden"] is True and o["chartsShut"]["aria"] == "false" and "Show" in o["chartsShut"]["text"]
+
+
+def test_elements_that_start_hidden_can_actually_hide():
+    # A class rule such as `.charts { display: flex }` beats the hidden attribute, so each id needs its own [hidden] rule.
+    html = (Path(__file__).parent.parent / "docs" / "index.html").read_text()
+    ids = re.findall(r'<\w+[^>]*\bid="(\w+)"[^>]*\shidden\b|<\w+[^>]*\shidden\b[^>]*\bid="(\w+)"', html)
+    ids = {a or b for a, b in ids}
+    assert {"charts", "info", "filters", "chemOpt"} <= ids
+    for i in ids:
+        assert re.search(rf"#{i}\[hidden\]\s*\{{\s*display:\s*none", html), f"#{i}[hidden] has no display:none rule"
