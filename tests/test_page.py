@@ -20,11 +20,13 @@ def test_additional_variables_appear_only_for_mt4s_and_come_back_off():
         assert o["mt4s"][c] == o["mtso"][c]                      # the additions are all CAM fields
 
 
-def test_additional_only_filter_and_group_checkboxes():
+def test_additional_checkbox_is_inclusive_and_group_checkboxes():
     o = run()
+    assert o["noExtra"] == o["mtso"]                              # unchecked: nothing added
+    assert o["mt4s"]["atm"] > o["mtso"]["atm"]                    # checked (default): added on top of the CMIP7 lines
     assert o["onlyAllExtra"] and o["only"]["atm"] == o["onlyIcons"] > 0 and sum(o["only"].values()) == o["only"]["atm"]
     added = o["mt4s"]["atm"] - o["mtso"]["atm"]
-    assert o["only"]["atm"] == added                              # additional-only = exactly what MTt4s added
+    assert o["only"]["atm"] == added                              # no mapping box ticked = exactly what MTt4s added
     # with the filter on, each group checkbox removes only its own group: chemistry-only + simone-tapes = all additions
     assert 0 < o["noChem"]["atm"] < o["only"]["atm"] and 0 < o["noAtm"]["atm"] < o["only"]["atm"]
     assert o["noChem"]["atm"] + o["noAtm"]["atm"] == o["only"]["atm"]
@@ -33,12 +35,3 @@ def test_additional_only_filter_and_group_checkboxes():
 def test_namelist_with_additions_has_a_5day_tape_and_validates():
     nl = run()["nl"]
     assert "error" not in nl and "5day" in nl["freqs"] and nl["errors"] == []
-
-
-def test_filter_for_additional_variables_also_in_the_cmip7_request():
-    o = run()
-    both = o["both"]["atm"]
-    assert both > 0 and o["bothAllMarked"] and o["bothIcons"] == 0 and o["bothCount"] == f"({both})"   # no icon for these
-    assert sum(o["both"].values()) == both                         # nothing but those CAM rows
-    assert o["union"]["atm"] == o["only"]["atm"] + both            # the two additional views together
-    assert both <= o["mt4s"]["atm"] - o["only"]["atm"]             # they are CMIP7 rows, not extra ones

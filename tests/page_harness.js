@@ -26,15 +26,13 @@ vm.runInContext(code + "\n;globalThis.__api = { state, render, compute, get curr
   A.render(); out.mtso = sum(); out.mtsoIcons = icons();
   chemValue = "chem"; A.syncChem(); A.render(); out.mt4s = sum(); out.mt4sIcons = icons();
   out.chemOptHidden = mk("chemOpt").hidden; out.addAtmDisabled = mk("addAtm").disabled;
-  out.unconfirmedShown = mk("n-unconfirmed").textContent;
-  st.addOnly = true; A.render(); out.only = sum(); out.onlyIcons = icons();
+  st.addExtra = false; A.render(); out.noExtra = sum();
+  st.addExtra = true; const keepSt = st.st; st.st = new Set(); A.render(); out.only = sum(); out.onlyIcons = icons();   // no mapping box ticked: additional variables alone
   out.onlyAllExtra = [...A.current.comps.atm.values()].every(r => r.items.every(x => x.extra));
-  st.addOnly = false; st.addBoth = true; A.render(); out.both = sum(); out.bothIcons = (main.innerHTML.match(/&#8853;/g) || []).length;
-  out.bothCount = mk("n-both").textContent; out.bothAllMarked = [...A.current.comps.atm.values()].every(r => r.simone);
-  st.addOnly = true; A.render(); out.union = sum(); st.addBoth = false; st.addOnly = true;
   st.addChem = false; A.render(); out.noChem = sum();
   st.addChem = true; st.addAtm = false; A.render(); out.noAtm = sum();
-  st.addAtm = true; st.addOnly = false; chemValue = "MTso"; A.syncChem(); A.render(); out.back = sum(); out.chemOptHiddenAgain = mk("chemOpt").hidden;
+  st.st = keepSt;
+  st.addAtm = true; chemValue = "MTso"; A.syncChem(); A.render(); out.back = sum(); out.chemOptHiddenAgain = mk("chemOpt").hidden;
   chemValue = "chem"; A.syncChem(); A.render();
   const o = ctx.Namelist.build("atm", [...A.current.comps.atm.values()], { iceFields: [], momFields: {} });
   out.nl = o.error ? { error: o.error } : { freqs: [...new Set(o.tapes.map(t => t.freq))], errors: o.validation.errors };
